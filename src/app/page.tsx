@@ -1,45 +1,41 @@
+import Link from "next/link";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-async function fetchHealth() {
-  if (!hasSupabaseEnv()) {
-    return { status: "unconfigured" as const, message: "Supabase env vars not set" };
-  }
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("health_check")
-      .select("id, label, created_at")
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (error) return { status: "error" as const, message: error.message };
-    if (!data) return { status: "empty" as const, message: "health_check table has no rows" };
-    return { status: "ok" as const, message: `${data.label} (row ${data.id})` };
-  } catch (e) {
-    return { status: "error" as const, message: (e as Error).message };
-  }
-}
-
 export default async function Home() {
-  const health = await fetchHealth();
-  const tone =
-    health.status === "ok"
-      ? "text-emerald-600"
-      : health.status === "unconfigured"
-        ? "text-amber-600"
-        : "text-red-600";
-
+  let health = "unconfigured";
+  let wall: { slug: string; name: string; current_asset_url: string | null } | null = null;
+  if (hasSupabaseEnv()) {
+    const supabase = await createClient();
+    const { data, error } = await supabase.from("health_check").select("id").limit(1).maybeSingle();
+    health = error ? `error: ${error.message}` : data ? "ok" : "empty";
+    const { data: room } = await supabase.from("rooms").select("slug, name, current_asset_url").eq("slug", "the-wall").maybeSingle();
+    wall = room;
+  }
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 font-sans">
-      <h1 className="text-4xl font-semibold tracking-tight">collabspace</h1>
-      <p className="text-zinc-500">Collaborative prompt-economy platform. Hello, world.</p>
-      <div className="rounded-lg border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800">
-        <span className="text-zinc-500">Supabase: </span>
-        <span className={tone}>{health.status}</span>
-        <span className="text-zinc-400"> — {health.message}</span>
+    <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col items-center justify-center gap-8 p-8 text-center">
+      <div className="space-y-3">
+        <h1 className="text-5xl font-semibold tracking-tight">collabspace</h1>
+        <p className="max-w-xl text-zinc-500">
+          Make things together. Public walls run on a fair, credit-gated prompt queue. Private rooms give small teams
+          shared boards and canvases with adaptive collaboration modes.
+        </p>
       </div>
+      <div className="flex flex-wrap justify-center gap-3">
+        {wall && (
+          <Link href={`/rooms/${wall.slug}`} className="rounded-md bg-zinc-900 px-4 py-2 text-white dark:bg-zinc-100 dark:text-black">
+            Join {wall.name}
+          </Link>
+        )}
+        <Link href="/rooms" className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
+          Browse rooms
+        </Link>
+        <Link href="/rooms/new" className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
+          Create a room
+        </Link>
+      </div>
+      <p className="text-xs text-zinc-400">supabase: {health}</p>
     </main>
   );
 }
