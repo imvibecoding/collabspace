@@ -67,7 +67,9 @@ export function HistoryList({ rows }: { rows: HistoryRow[] }) {
           {rows.map((r) => (
             <li key={r.id} className="flex justify-between gap-3">
               <span>{describe(r)}</span>
-              <span className="shrink-0 text-zinc-400">{new Date(r.created_at).toLocaleTimeString()}</span>
+              <span className="shrink-0 text-zinc-400" suppressHydrationWarning>
+                {new Date(r.created_at).toLocaleTimeString()}
+              </span>
             </li>
           ))}
         </ol>

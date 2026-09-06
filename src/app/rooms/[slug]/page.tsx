@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { resolveDueWindows } from "@/lib/queue/service";
-import { getBalances } from "@/lib/credits/ledger";
+import { ensureMonthlyGrant, getBalances } from "@/lib/credits/ledger";
 import { listImageProviders } from "@/lib/providers/image";
 import { REVERT_THRESHOLD } from "@/lib/reputation/service";
 import { windowStart } from "@/lib/queue/engine";
@@ -20,6 +20,8 @@ export default async function RoomPage({ params }: { params: Promise<{ slug: str
 
   const { data: roomLookup } = await supabase.from("rooms").select("id, type").eq("slug", slug).maybeSingle();
   if (!roomLookup) notFound();
+
+  if (user) await ensureMonthlyGrant(user.id);
 
   // Opportunistic resolution keeps the room live even without the cron tick.
   if (roomLookup.type === "art") await resolveDueWindows(roomLookup.id);

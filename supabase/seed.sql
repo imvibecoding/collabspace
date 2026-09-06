@@ -1,10 +1,14 @@
 -- Local/dev seed: a system account and one public art wall.
 -- Safe to re-run (db reset applies migrations then this file).
+-- Note: GoTrue requires the token/change columns to be '' rather than NULL.
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
-  created_at, updated_at, confirmation_token, recovery_token
+  created_at, updated_at,
+  confirmation_token, recovery_token, email_change, email_change_token_new,
+  email_change_token_current, phone_change, phone_change_token, reauthentication_token,
+  email_change_confirm_status, is_sso_user, is_anonymous
 ) values (
   '00000000-0000-0000-0000-000000000000',
   '00000000-0000-0000-0000-000000000001',
@@ -14,7 +18,9 @@ insert into auth.users (
   now(),
   '{"provider":"email","providers":["email"]}'::jsonb,
   '{"display_name":"collabspace"}'::jsonb,
-  now(), now(), '', ''
+  now(), now(),
+  '', '', '', '', '', '', '', '',
+  0, false, false
 ) on conflict (id) do nothing;
 
 insert into public.rooms (id, slug, name, type, visibility, mode, owner_id, rules,

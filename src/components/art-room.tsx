@@ -9,11 +9,14 @@ import { HistoryList, type HistoryRow } from "./history-list";
 type Lane = "base" | "premium" | "instant";
 
 function Countdown({ windowStart, seconds }: { windowStart: string; seconds: number }) {
-  const [now, setNow] = useState(() => Date.now());
+  // null until mounted so server and client markup match (avoids hydration mismatch).
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
+    setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+  if (now === null) return <span className="tabular-nums">--:--</span>;
   const end = new Date(windowStart).getTime() + seconds * 1000;
   const left = Math.max(0, Math.round((end - now) / 1000));
   return (

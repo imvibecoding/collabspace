@@ -44,7 +44,8 @@ export async function createRoom(input: {
       type: input.type,
       visibility: input.visibility,
       // Public rooms are always queue-based; private rooms start freeform (brief §2.4).
-      mode: input.visibility === "public" ? "queue" : isArt ? "freeform" : "sectioned",
+      // Card locking is always available in kanban rooms regardless of mode.
+      mode: input.visibility === "public" ? "queue" : "freeform",
       owner_id: input.ownerId,
       rules: isArt ? { max_prompt_words: 6 } : {},
     })
@@ -69,16 +70,12 @@ export async function inviteByEmail(roomId: string, inviterId: string, email: st
   const { data: room } = await admin.from("rooms").select("*").eq("id", roomId).single();
   if (!room || room.owner_id !== inviterId) return { ok: false, message: "Only the room owner can invite" };
 
-  // Look the user up by email through the auth admin API (profiles don't store email).
+  // Resolve email → user id via a security-definer DB function (profiles don't store email).
   const target = email.trim().toLowerCase();
-  let userId: string | null = null;
-  for (let page = 1; page <= 10 && !userId; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error) return { ok: false, message: error.message };
-    userId = data.users.find((u) => u.email?.toLowerCase() === target)?.id ?? null;
-    if (data.users.length < 200) break;
-  }
+  const { data: userId, error: lookupErr } = await admin.rpc("find_user_id_by_email", { p_email: target });
+  if (lookupErr) return { ok: false, message: lookupErr.message };
   if (!userId) return { ok: false, message: "No account with that email yet. Ask them to sign up first." };
+  if (userId === inviterId) return { ok: false, message: "You are already the owner." };
 
   const { error } = await admin
     .from("room_participants")
@@ -117,7 +114,7 @@ export async function maybeSuggestModeChange(roomId: string): Promise<Tables<"ro
   if (room.mode === "freeform" && participants >= QUEUE_SUGGESTION_THRESHOLD) {
     target = "queue";
     reason = `${participants} people are now in this room. Turn-based editing keeps larger groups from stepping on each other.`;
-  } else if (room.mode !== "freeform" && participants < QUEUE_SUGGESTION_THRESHOLD) {
+  } else if (room.mode === "queue" && participants < QUEUE_SUGGESTION_THRESHOLD) {
     target = "freeform";
     reason = `Only ${participants} people are in this room now. Freeform editing is simpler for small groups.`;
   }

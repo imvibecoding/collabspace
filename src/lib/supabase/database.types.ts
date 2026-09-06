@@ -703,6 +703,7 @@ export type Database = {
           paid: number
         }[]
       }
+      find_user_id_by_email: { Args: { p_email: string }; Returns: string }
       grant_credits: {
         Args: {
           p_amount: number
