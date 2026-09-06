@@ -12,9 +12,12 @@ function Countdown({ windowStart, seconds }: { windowStart: string; seconds: num
   // null until mounted so server and client markup match (avoids hydration mismatch).
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
-    setNow(Date.now());
+    const first = setTimeout(() => setNow(Date.now()), 0);
     const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
   }, []);
   if (now === null) return <span className="tabular-nums">--:--</span>;
   const end = new Date(windowStart).getTime() + seconds * 1000;

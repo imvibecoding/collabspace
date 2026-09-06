@@ -111,13 +111,15 @@ export function KanbanRoom(props: {
   history: HistoryRow[];
 }) {
   useRoomRealtime(props.room.id, ["kanban_cards", "kanban_columns", "room_participants", "room_mode_changes", "action_history"]);
-  const someoneElseEditing = props.room.mode === "queue" && props.cards.some((c) => c.locked_by && c.locked_by !== props.userId);
+  const iHoldTurn = props.cards.some((c) => c.locked_by === props.userId);
+  const someoneElseEditing = props.cards.some((c) => c.locked_by && c.locked_by !== props.userId);
 
   return (
     <div className="space-y-6">
       {props.room.mode === "queue" && (
         <p className="rounded-md bg-zinc-100 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
-          Turn-based mode: one person edits at a time. {someoneElseEditing ? "Someone currently holds the turn." : "The turn is free — lock a card to take it."}
+          Turn-based mode: one person edits at a time.{" "}
+          {iHoldTurn ? "You hold the turn — unlock your card to pass it on." : someoneElseEditing ? "Someone currently holds the turn." : "The turn is free — lock a card to take it."}
         </p>
       )}
       <div className="grid gap-4 md:grid-cols-3">
