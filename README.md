@@ -75,6 +75,8 @@ Schema changes: add a file to `supabase/migrations/`, run `npx supabase migratio
      `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET` (random string; protects the tick endpoint),
      `IMAGE_PROVIDER_DEFAULT=mock`. Also add `https://ironically.ai/collabspace` to Supabase Auth → URL configuration
      (site URL + redirect URLs).
-   - `vercel.json` here schedules `/collabspace/api/queue/tick` every minute.
+   - Queue windows resolve on every room page load and on each open client's 15s refresh; `vercel.json` adds a daily
+     safety tick (Vercel Hobby allows daily cron only). Point an external pinger at `/collabspace/api/queue/tick`
+     with `Authorization: Bearer $CRON_SECRET` if idle rooms must resolve without visitors.
    - To run locally the app is at http://localhost:3000/collabspace (set `NEXT_PUBLIC_BASE_PATH=` to serve at the root).
 3. **GitHub**: protect `main` (require PRs). `gh` is installed locally; run `gh auth login` first.
