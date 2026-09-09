@@ -95,7 +95,9 @@ export async function submit(input: {
 
   const config = roomQueueConfig(room);
   const now = new Date();
-  const lane = input.lane;
+  // Freeform private rooms have no queue (brief §2.4): every prompt applies at once at the base price.
+  const freeform = room.visibility === "private" && room.mode === "freeform";
+  const lane: Lane = freeform ? "instant" : input.lane;
   const bid = lane === "premium" ? Math.floor(input.bidCredits ?? 0) : 0;
   const wStart =
     lane === "instant"
@@ -118,7 +120,7 @@ export async function submit(input: {
   }
 
   const provider = getImageProvider(input.providerKey);
-  const cost = submissionCost(config, lane, bid);
+  const cost = freeform ? config.basePriceCredits : submissionCost(config, lane, bid);
 
   const { data: sub, error: insErr } = await admin
     .from("queue_submissions")

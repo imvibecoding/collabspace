@@ -70,7 +70,8 @@ export function WorldRoom(props: {
   const topBid = premiumPending.reduce((m, p) => Math.max(m, p.bid), 0);
   const minBid = Math.max(room.premium_min_bid_credits, topBid + (topBid ? room.premium_bid_increment_credits : 0));
   const rules = (room.rules ?? {}) as { max_prompt_words?: number; world_prompt?: string };
-  const cost = lane === "base" ? room.base_price_credits : lane === "instant" ? room.instant_price_credits : minBid;
+  const freeform = room.visibility === "private" && room.mode === "freeform";
+  const cost = freeform || lane === "base" ? room.base_price_credits : lane === "instant" ? room.instant_price_credits : minBid;
   const selMeta = (selected?.meta ?? {}) as EntityMeta;
   const selEntry = selMeta.submissionId ? props.timeline.find((t) => t.id === selMeta.submissionId) : undefined;
 
@@ -191,7 +192,8 @@ export function WorldRoom(props: {
               placeholder={`e.g. "park a red taxi outside the bank" (≤${rules.max_prompt_words ?? 12} words)`}
               className="w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
             />
-            <div className="grid grid-cols-3 gap-1 text-xs">
+            {freeform && <p className="text-xs text-zinc-500">Freeform room: prompts apply immediately for {room.base_price_credits} credit.</p>}
+            <div className={`grid grid-cols-3 gap-1 text-xs${freeform ? " hidden" : ""}`}>
               {(["base", "premium", "instant"] as Lane[]).map((l) => (
                 <label key={l} className={`cursor-pointer rounded-md border px-2 py-1.5 text-center ${lane === l ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-black" : "border-zinc-300 dark:border-zinc-700"}`}>
                   <input type="radio" value={l} checked={lane === l} onChange={() => setLane(l)} className="sr-only" aria-label={l} />
@@ -229,7 +231,7 @@ export function WorldRoom(props: {
           </div>
         )}
 
-        <div className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800">
+        {!freeform && <div className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800">
           <div className="flex items-center justify-between">
             <span className="font-medium">Premium lane</span>
             <span className="text-xs text-zinc-500">
@@ -267,7 +269,7 @@ export function WorldRoom(props: {
               ))}
             </ul>
           )}
-        </div>
+        </div>}
 
         {props.myReverted.length > 0 && (
           <div className="space-y-2 rounded-xl border border-red-300 p-4 text-sm dark:border-red-800">
