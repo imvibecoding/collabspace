@@ -14,7 +14,11 @@ function describe(row: HistoryRow): string {
     case "submission.created":
       return `${who} queued “${p.prompt}” (${p.lane})`;
     case "submission.applied":
-      return `${who}'s “${p.prompt}” was applied`;
+      return p.summary ? `${who} ${p.summary}` : `${who}'s “${p.prompt}” was applied`;
+    case "world.created":
+      return `base world generated from “${p.prompt}”`;
+    case "room.forked":
+      return `${who} forked this world from a snapshot`;
     case "submission.reverted":
       return `a change was reverted (${p.reason})`;
     case "submission.failed":

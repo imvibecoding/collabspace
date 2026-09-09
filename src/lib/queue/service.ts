@@ -5,6 +5,7 @@ import type { Json } from "@/lib/supabase/database.types";
 import { InsufficientCreditsError, spend, refundSubmission } from "@/lib/credits/ledger";
 import { filterPrompt, type RoomRules } from "@/lib/moderation/prompt-filter";
 import { getImageProvider } from "@/lib/providers/image";
+import { applyWorldSubmission } from "@/lib/world/service";
 import {
   resolveWindow,
   submissionCost,
@@ -61,7 +62,7 @@ export async function submit(input: {
 }): Promise<SubmitResult> {
   const admin = createAdminClient();
   const { data: room } = await admin.from("rooms").select("*").eq("id", input.roomId).single();
-  if (!room || room.type !== "art") return { ok: false, code: "room", message: "Room not found" };
+  if (!room || (room.type !== "art" && room.type !== "world")) return { ok: false, code: "room", message: "Room not found" };
 
   // Access: public rooms accept anyone signed in; private rooms need membership.
   if (room.visibility === "private" && room.owner_id !== input.userId) {
@@ -165,6 +166,7 @@ export async function submit(input: {
 
 /** Generate the asset for a winning submission and make it the room's current state. */
 export async function applySubmission(sub: Submission, room: Room): Promise<void> {
+  if (room.type === "world") return applyWorldSubmission(sub, room);
   const admin = createAdminClient();
   const provider = getImageProvider(sub.provider);
   let asset;
@@ -203,7 +205,7 @@ export async function applySubmission(sub: Submission, room: Room): Promise<void
  */
 export async function resolveDueWindows(roomId?: string): Promise<{ applied: number; refunded: number }> {
   const admin = createAdminClient();
-  let roomsQuery = admin.from("rooms").select("*").eq("type", "art");
+  let roomsQuery = admin.from("rooms").select("*").in("type", ["art", "world"]);
   if (roomId) roomsQuery = roomsQuery.eq("id", roomId);
   const { data: rooms } = await roomsQuery;
   const totals = { applied: 0, refunded: 0 };

@@ -1,7 +1,9 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Enums, Tables } from "@/lib/supabase/types";
+import type { Json } from "@/lib/supabase/database.types";
 import { spend, InsufficientCreditsError } from "@/lib/credits/ledger";
+import { ensureWorld, roomWorld } from "@/lib/world/service";
 
 /** Participant count at which we suggest moving from freeform to a queue mode. */
 export const QUEUE_SUGGESTION_THRESHOLD = 4;
@@ -33,9 +35,12 @@ export async function createRoom(input: {
   name: string;
   type: Enums<"room_type">;
   visibility: Enums<"room_visibility">;
+  /** World rooms: the prompt that generates the base map. */
+  worldPrompt?: string;
 }): Promise<Tables<"rooms">> {
   const admin = createAdminClient();
   const isArt = input.type === "art";
+  const isWorld = input.type === "world";
   const { data: room, error } = await admin
     .from("rooms")
     .insert({
@@ -47,19 +52,20 @@ export async function createRoom(input: {
       // Card locking is always available in kanban rooms regardless of mode.
       mode: input.visibility === "public" ? "queue" : "freeform",
       owner_id: input.ownerId,
-      rules: isArt ? { max_prompt_words: 6 } : {},
+      rules: isArt ? { max_prompt_words: 6 } : isWorld ? { max_prompt_words: 12, world_prompt: (input.worldPrompt ?? input.name).trim().slice(0, 200) } : {},
     })
     .select("*")
     .single();
   if (error || !room) throw error ?? new Error("Could not create room");
 
   await admin.from("room_participants").insert({ room_id: room.id, user_id: input.ownerId, role: "owner" });
-  if (!isArt) {
+  if (input.type === "kanban") {
     await admin.from("kanban_columns").insert(
       ["To do", "Doing", "Done"].map((title, position) => ({ room_id: room.id, title, position })),
     );
   }
   await history(room.id, input.ownerId, "room.created", { type: "room", id: room.id }, { type: input.type, visibility: input.visibility });
+  if (isWorld) return (await ensureWorld(room)).room;
   return room;
 }
 
@@ -178,7 +184,12 @@ export async function createSnapshot(userId: string, roomId: string, opts: { pai
       room_id: roomId,
       created_by: userId,
       asset_url: room.current_asset_url,
-      state: { submission_id: room.current_submission_id, paid: opts.paid, room_name: room.name },
+      state: {
+        submission_id: room.current_submission_id,
+        paid: opts.paid,
+        room_name: room.name,
+        ...(room.type === "world" ? { world: roomWorld(room) as unknown as Json } : {}),
+      },
     })
     .select("*")
     .single();

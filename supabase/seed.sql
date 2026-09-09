@@ -35,3 +35,18 @@ values (
 insert into public.room_participants (room_id, user_id, role)
 values ('00000000-0000-0000-0000-00000000a001', '00000000-0000-0000-0000-000000000001', 'owner')
 on conflict do nothing;
+
+-- Public 2D world (base map is generated lazily on first load from rules.world_prompt).
+insert into public.rooms (id, slug, name, type, visibility, mode, owner_id, rules,
+  base_window_seconds, premium_window_seconds, base_price_credits, premium_min_bid_credits,
+  premium_bid_increment_credits, instant_price_credits)
+values (
+  '00000000-0000-0000-0000-00000000a002', 'the-block', 'The Block', 'world', 'public', 'queue',
+  '00000000-0000-0000-0000-000000000001',
+  '{"max_prompt_words": 12, "world_prompt": "a sunny seaside city with a harbour and a river"}'::jsonb,
+  120, 120, 1, 5, 1, 20
+) on conflict (slug) do nothing;
+
+insert into public.room_participants (room_id, user_id, role)
+values ('00000000-0000-0000-0000-00000000a002', '00000000-0000-0000-0000-000000000001', 'owner')
+on conflict do nothing;

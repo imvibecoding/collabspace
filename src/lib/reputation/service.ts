@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Tables } from "@/lib/supabase/types";
+import { restoreWorldSubmission, revertWorldSubmission } from "@/lib/world/service";
 
 /** Weighted downvotes needed to revert the currently-applied change. */
 export const REVERT_THRESHOLD = 3;
@@ -56,7 +57,9 @@ export async function revertSubmission(sub: Tables<"queue_submissions">, actorId
     .update({ status: "reverted", reverted_at: new Date().toISOString() })
     .eq("id", sub.id);
   const { data: room } = await admin.from("rooms").select("*").eq("id", sub.room_id).single();
-  if (room?.current_submission_id === sub.id) {
+  if (room?.type === "world") {
+    await revertWorldSubmission(sub);
+  } else if (room?.current_submission_id === sub.id) {
     const { data: prev } = await admin
       .from("queue_submissions")
       .select("id, result_asset_url")
@@ -236,7 +239,10 @@ export async function appeal(
       .gt("applied_at", sub.applied_at ?? sub.created_at)
       .limit(1);
     await admin.from("queue_submissions").update({ status: "applied", reverted_at: null }).eq("id", sub.id);
-    if (!newer || newer.length === 0 || !room?.current_submission_id) {
+    const { data: roomRow } = await admin.from("rooms").select("type").eq("id", sub.room_id).single();
+    if (roomRow?.type === "world") {
+      await restoreWorldSubmission(sub);
+    } else if (!newer || newer.length === 0 || !room?.current_submission_id) {
       await admin
         .from("rooms")
         .update({ current_asset_url: sub.result_asset_url, current_submission_id: sub.id })

@@ -1,7 +1,9 @@
 # collabspace
 
 Collaborative prompt-economy platform. See [docs/prompt-economy-platform-brief.md](docs/prompt-economy-platform-brief.md)
-for the full build brief. MVP scope is the **Public Art Prompt Room** and the **Kanban Room** (brief §4).
+for the full build brief and [docs/world-room-design.md](docs/world-room-design.md) for the world-room pivot.
+The viral public room is a **2D top-down world** grown by prompts ("The Block"); the Art wall and
+Kanban board exercise the same engine.
 
 ## Stack
 
@@ -18,6 +20,7 @@ Next.js 16 (App Router, TypeScript, Tailwind v4) · Supabase (Postgres, Auth, Re
 | Reputation, weighted downvotes, escalation ladder, appeal review | `src/lib/reputation/` | done (heuristic reviewer; model reviewer pluggable) |
 | Rooms, invites, adaptive mode suggestions | `src/lib/rooms/` | done |
 | Snapshots / "buy a print" | `src/lib/rooms/service.ts`, `/s/[id]` | done |
+| **World rooms** (2D top-down, prompt → patch, timelapse, fork) | `src/lib/world/`, `src/components/world-*.tsx` | done — see [docs/world-room-design.md](docs/world-room-design.md) |
 | Art room UI | `src/components/art-room.tsx` | done |
 | Kanban UI with card locks and turn mode | `src/components/kanban-room.tsx` | done |
 | Queue tick endpoint + Vercel cron | `src/app/api/queue/tick`, `vercel.json` | done |
@@ -51,15 +54,18 @@ queue, ledger, downvote and appeal paths.
 
 Schema changes: add a file to `supabase/migrations/`, run `npx supabase migration up`, then `npm run db:types`.
 
-## Moving to hosted Supabase + Vercel
+## Hosted Supabase (done) + Vercel (to do)
 
-1. **Supabase**: create a project (free tier allows two active projects per org; pause one if needed). Then:
-   ```bash
-   npx supabase link --project-ref <ref>
-   npx supabase db push          # applies supabase/migrations
+1. **Supabase**: project `collabspace` (ref `aqszydhbnfvvnfeupnmk`, ap-southeast-2, $10/month on the Pro org).
+   All migrations and the seed (system user, The Wall, The Block) are applied via the Supabase MCP.
+   To apply future migrations: `npx supabase link --project-ref aqszydhbnfvvnfeupnmk && npx supabase db push`.
+   Hosted env values:
    ```
-   Run `supabase/seed.sql` in the SQL editor once to create the system user and The Wall.
-   Enable phone auth + SMS provider when ready (brief §2.2).
+   NEXT_PUBLIC_SUPABASE_URL=https://aqszydhbnfvvnfeupnmk.supabase.co
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_K_WYw6TYrlVDDPiSgMPZQw_L4UxJ5U7
+   SUPABASE_SERVICE_ROLE_KEY=<Project Settings → API keys → secret key; never commit>
+   ```
+   Enable phone auth + an SMS provider when ready (brief §2.2).
 2. **Vercel**: import the GitHub repo as a new project. Set env vars:
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
    `CRON_SECRET` (any random string; protects `/api/queue/tick`), `IMAGE_PROVIDER_DEFAULT=mock` until a real

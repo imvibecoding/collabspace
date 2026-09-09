@@ -12,10 +12,12 @@ export async function createRoomAction(formData: FormData) {
   if (!user) redirect("/login?next=/rooms/new");
 
   const name = String(formData.get("name") ?? "").trim();
-  const type = formData.get("type") === "kanban" ? "kanban" : "art";
+  const typeRaw = String(formData.get("type") ?? "world");
+  const type = typeRaw === "kanban" ? "kanban" : typeRaw === "art" ? "art" : "world";
+  const worldPrompt = String(formData.get("world_prompt") ?? "").trim();
   const visibility = formData.get("visibility") === "public" ? "public" : "private";
   if (!name) redirect("/rooms/new?error=Name%20is%20required");
 
-  const room = await createRoom({ ownerId: user.id, name, type, visibility });
+  const room = await createRoom({ ownerId: user.id, name, type, visibility, worldPrompt: worldPrompt || undefined });
   redirect(`/rooms/${room.slug}`);
 }

@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { submit } from "@/lib/queue/service";
 import { appeal, downvote } from "@/lib/reputation/service";
 import { createSnapshot, inviteByEmail, resolveModeSuggestion, setRoomMode } from "@/lib/rooms/service";
+import { forkSnapshot } from "@/lib/world/service";
+import { redirect } from "next/navigation";
 import type { Enums } from "@/lib/supabase/types";
 
 export type ActionState = { ok?: boolean; error?: string; message?: string };
@@ -70,6 +72,14 @@ export async function snapshotAction(_prev: ActionState, formData: FormData): Pr
   revalidatePath(`/rooms/${String(formData.get("slug"))}`);
   if (!r.ok) return { error: r.message };
   return { ok: true, message: `${paid ? "Print" : "Snapshot"} ready: /s/${r.snapshot.id}` };
+}
+
+export async function forkAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { user } = await requireUser();
+  if (!user) return { error: "Sign in" };
+  const r = await forkSnapshot(user.id, String(formData.get("snapshot_id")), String(formData.get("name") ?? ""));
+  if (!r.ok) return { error: r.message };
+  redirect(`/rooms/${r.room.slug}`);
 }
 
 /* ----------------------------- Shared ------------------------------------ */

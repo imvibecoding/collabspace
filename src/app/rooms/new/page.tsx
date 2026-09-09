@@ -12,9 +12,17 @@ export default async function NewRoomPage({ searchParams }: { searchParams: Prom
         </label>
         <fieldset className="text-sm">
           <legend className="text-zinc-600 dark:text-zinc-400">Type</legend>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
             <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-300 p-3 dark:border-zinc-700">
-              <input type="radio" name="type" value="art" defaultChecked />
+              <input type="radio" name="type" value="world" defaultChecked />
+              <span>
+                <span className="font-medium">2D world</span>
+                <br />
+                <span className="text-xs text-zinc-500">Top-down world people grow with prompts.</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-300 p-3 dark:border-zinc-700">
+              <input type="radio" name="type" value="art" />
               <span>
                 <span className="font-medium">Art prompt wall</span>
                 <br />
@@ -31,6 +39,11 @@ export default async function NewRoomPage({ searchParams }: { searchParams: Prom
             </label>
           </div>
         </fieldset>
+        <label className="block text-sm">
+          <span className="text-zinc-600 dark:text-zinc-400">World prompt (worlds only)</span>
+          <input name="world_prompt" maxLength={200} placeholder="a rainy neon city by the harbour" className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700" />
+          <span className="text-xs text-zinc-500">Generates the base map. Everyone else adds to it with prompts.</span>
+        </label>
         <fieldset className="text-sm">
           <legend className="text-zinc-600 dark:text-zinc-400">Visibility</legend>
           <div className="mt-2 flex gap-4">

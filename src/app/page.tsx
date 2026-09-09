@@ -10,7 +10,7 @@ export default async function Home() {
     const supabase = await createClient();
     const { data, error } = await supabase.from("health_check").select("id").limit(1).maybeSingle();
     health = error ? `error: ${error.message}` : data ? "ok" : "empty";
-    const { data: room } = await supabase.from("rooms").select("slug, name, current_asset_url").eq("slug", "the-wall").maybeSingle();
+    const { data: room } = await supabase.from("rooms").select("slug, name, current_asset_url").eq("slug", "the-block").maybeSingle();
     wall = room;
   }
   return (
@@ -18,8 +18,8 @@ export default async function Home() {
       <div className="space-y-3">
         <h1 className="text-5xl font-semibold tracking-tight">collabspace</h1>
         <p className="max-w-xl text-zinc-500">
-          Make things together. Public walls run on a fair, credit-gated prompt queue. Private rooms give small teams
-          shared boards and canvases with adaptive collaboration modes.
+          Build a world together, one prompt at a time. Public worlds run on a fair, credit-gated prompt queue. Private
+          rooms give small teams their own worlds, canvases and boards.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-3">

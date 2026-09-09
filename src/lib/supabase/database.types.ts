@@ -369,6 +369,7 @@ export type Database = {
           id: string
           lane: Database["public"]["Enums"]["queue_lane"]
           moderation: Json
+          patch: Json | null
           prompt: string
           provider: string | null
           result_asset_url: string | null
@@ -385,6 +386,7 @@ export type Database = {
           id?: string
           lane?: Database["public"]["Enums"]["queue_lane"]
           moderation?: Json
+          patch?: Json | null
           prompt: string
           provider?: string | null
           result_asset_url?: string | null
@@ -401,6 +403,7 @@ export type Database = {
           id?: string
           lane?: Database["public"]["Enums"]["queue_lane"]
           moderation?: Json
+          patch?: Json | null
           prompt?: string
           provider?: string | null
           result_asset_url?: string | null
@@ -566,6 +569,7 @@ export type Database = {
           created_at: string
           current_asset_url: string | null
           current_submission_id: string | null
+          forked_from_snapshot: string | null
           id: string
           instant_price_credits: number
           mode: Database["public"]["Enums"]["collab_mode"]
@@ -579,6 +583,8 @@ export type Database = {
           type: Database["public"]["Enums"]["room_type"]
           updated_at: string
           visibility: Database["public"]["Enums"]["room_visibility"]
+          world: Json | null
+          world_initial: Json | null
         }
         Insert: {
           base_price_credits?: number
@@ -586,6 +592,7 @@ export type Database = {
           created_at?: string
           current_asset_url?: string | null
           current_submission_id?: string | null
+          forked_from_snapshot?: string | null
           id?: string
           instant_price_credits?: number
           mode?: Database["public"]["Enums"]["collab_mode"]
@@ -599,6 +606,8 @@ export type Database = {
           type: Database["public"]["Enums"]["room_type"]
           updated_at?: string
           visibility?: Database["public"]["Enums"]["room_visibility"]
+          world?: Json | null
+          world_initial?: Json | null
         }
         Update: {
           base_price_credits?: number
@@ -606,6 +615,7 @@ export type Database = {
           created_at?: string
           current_asset_url?: string | null
           current_submission_id?: string | null
+          forked_from_snapshot?: string | null
           id?: string
           instant_price_credits?: number
           mode?: Database["public"]["Enums"]["collab_mode"]
@@ -619,6 +629,8 @@ export type Database = {
           type?: Database["public"]["Enums"]["room_type"]
           updated_at?: string
           visibility?: Database["public"]["Enums"]["room_visibility"]
+          world?: Json | null
+          world_initial?: Json | null
         }
         Relationships: [
           {
@@ -626,6 +638,13 @@ export type Database = {
             columns: ["current_submission_id"]
             isOneToOne: false
             referencedRelation: "queue_submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rooms_forked_from_snapshot_fkey"
+            columns: ["forked_from_snapshot"]
+            isOneToOne: false
+            referencedRelation: "snapshots"
             referencedColumns: ["id"]
           },
           {
@@ -757,7 +776,7 @@ export type Database = {
       flag_status: "open" | "reviewing" | "upheld" | "dismissed"
       participant_role: "owner" | "editor" | "viewer"
       queue_lane: "base" | "premium" | "instant"
-      room_type: "art" | "kanban"
+      room_type: "art" | "kanban" | "world"
       room_visibility: "public" | "private"
       submission_status:
         | "pending"
@@ -909,7 +928,7 @@ export const Constants = {
       flag_status: ["open", "reviewing", "upheld", "dismissed"],
       participant_role: ["owner", "editor", "viewer"],
       queue_lane: ["base", "premium", "instant"],
-      room_type: ["art", "kanban"],
+      room_type: ["art", "kanban", "world"],
       room_visibility: ["public", "private"],
       submission_status: [
         "pending",
