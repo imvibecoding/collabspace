@@ -179,6 +179,7 @@ export function WorldRoom(props: {
             <input type="hidden" name="room_id" value={room.id} />
             <input type="hidden" name="slug" value={room.slug} />
             <input type="hidden" name="provider" value="mock" />
+            <input type="hidden" name="lane" value={lane} />
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium">Change the world</span>
               <span className="text-xs text-zinc-500">{props.balance ?? 0} credits</span>
@@ -193,7 +194,7 @@ export function WorldRoom(props: {
             <div className="grid grid-cols-3 gap-1 text-xs">
               {(["base", "premium", "instant"] as Lane[]).map((l) => (
                 <label key={l} className={`cursor-pointer rounded-md border px-2 py-1.5 text-center ${lane === l ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-black" : "border-zinc-300 dark:border-zinc-700"}`}>
-                  <input type="radio" name="lane" value={l} checked={lane === l} onChange={() => setLane(l)} className="sr-only" />
+                  <input type="radio" value={l} checked={lane === l} onChange={() => setLane(l)} className="sr-only" aria-label={l} />
                   {l === "base" ? `Base · ${room.base_price_credits}` : l === "premium" ? `Bid · ${minBid}+` : `Instant · ${room.instant_price_credits}`}
                 </label>
               ))}
