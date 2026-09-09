@@ -2,8 +2,8 @@
 
 Collaborative prompt-economy platform. See [docs/prompt-economy-platform-brief.md](docs/prompt-economy-platform-brief.md)
 for the full build brief and [docs/world-room-design.md](docs/world-room-design.md) for the world-room pivot.
-The viral public room is a **2D top-down world** grown by prompts ("The Block"); the Art wall and
-Kanban board exercise the same engine.
+The viral public room is **Melbourne**, an isometric three.js city grown by prompts (`/rooms/melbourne`),
+lit by the real sun over Melbourne. The Art wall and Kanban board exercise the same engine.
 
 ## Stack
 
@@ -20,7 +20,7 @@ Next.js 16 (App Router, TypeScript, Tailwind v4) · Supabase (Postgres, Auth, Re
 | Reputation, weighted downvotes, escalation ladder, appeal review | `src/lib/reputation/` | done (heuristic reviewer; model reviewer pluggable) |
 | Rooms, invites, adaptive mode suggestions | `src/lib/rooms/` | done |
 | Snapshots / "buy a print" | `src/lib/rooms/service.ts`, `/s/[id]` | done |
-| **World rooms** (2D top-down, prompt → patch, timelapse, fork) | `src/lib/world/`, `src/components/world-*.tsx` | done — see [docs/world-room-design.md](docs/world-room-design.md) |
+| **World rooms** — isometric three.js Melbourne with real sun/time-of-day, districts, procedural city, prompt → patch, timelapse, fork | `src/lib/world/`, `src/components/world-3d.tsx` | done — see [docs/world-room-design.md](docs/world-room-design.md) |
 | Art room UI | `src/components/art-room.tsx` | done |
 | Kanban UI with card locks and turn mode | `src/components/kanban-room.tsx` | done |
 | Queue tick endpoint + Vercel cron | `src/app/api/queue/tick`, `vercel.json` | done |

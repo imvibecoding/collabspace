@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { WorldView } from "@/components/world-view";
+import { World3DClient } from "@/components/world-3d-client";
+import { normalizeWorld } from "@/lib/world/service";
 import type { WorldState } from "@/lib/world/types";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export default async function SnapshotPage({ params }: { params: Promise<{ id: s
         </span>
       </div>
       {state.world ? (
-        <WorldView world={state.world} />
+        <World3DClient world={normalizeWorld(state.world)!} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
           {snap.asset_url ? (

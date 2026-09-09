@@ -64,6 +64,8 @@ export interface WorldState {
   entities: WorldEntity[];
   /** City districts (empty for non-city themes). See src/lib/world/zones.ts. */
   zones: WorldZone[];
+  /** Seed for the procedural city layout (roads, lots, landmarks). Present for city worlds. */
+  citySeed?: string;
 }
 
 export type WorldOp =

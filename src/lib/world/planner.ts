@@ -9,6 +9,7 @@ import { rectsOverlap } from "./patch";
 import { DEFAULT_HEIGHT_BY_KIND } from "./types";
 import type { EntityKind, WorldEntity, WorldOp, WorldPatch, WorldState } from "./types";
 import { detectZoneByAlias, zoneForPrompt, zoneHint, type WorldZone } from "./zones";
+import { cityObstacles, generateCity, nearestFreeLot, snapToRoad, type CityLayout, type Rect } from "./city";
 
 export interface PlanContext {
   state: WorldState;
@@ -147,24 +148,34 @@ function nameFor(text: string, kindWord: string, color: string | null): string {
   return words.join(" ");
 }
 
-function freeSpot(state: WorldState, w: number, h: number, hint: [number, number] | null, rng: () => number): { x: number; y: number } {
+function freeSpot(state: WorldState, w: number, h: number, hint: [number, number] | null, rng: () => number, obstacles: Rect[] = []): { x: number; y: number } {
   const W = state.width;
   const H = state.height;
-  for (let attempt = 0; attempt < 60; attempt++) {
+  for (let attempt = 0; attempt < 90; attempt++) {
     const spread = hint ? 0.12 + attempt * 0.01 : 1;
     const cx = hint ? hint[0] * W + (rng() - 0.5) * spread * W : rng() * W;
     const cy = hint ? hint[1] * H + (rng() - 0.5) * spread * H : rng() * H;
     const x = Math.round(Math.min(W - w, Math.max(0, cx - w / 2)));
     const y = Math.round(Math.min(H - h, Math.max(0, cy - h / 2)));
     const rect = { x, y, w, h };
-    if (!state.entities.some((e) => e.kind !== "road" && e.kind !== "water" && rectsOverlap(e, rect))) return { x, y };
+    if (state.entities.some((e) => e.kind !== "road" && e.kind !== "water" && rectsOverlap(e, rect))) continue;
+    if (obstacles.some((o) => rectsOverlap(o, rect, 2))) continue;
+    return { x, y };
   }
   return { x: Math.round(rng() * (W - w)), y: Math.round(rng() * (H - h)) };
 }
 
-function nearSpot(anchor: WorldEntity, w: number, h: number, state: WorldState, rng: () => number) {
+function nearSpot(anchor: WorldEntity, w: number, h: number, state: WorldState, rng: () => number, obstacles: Rect[] = []) {
   const hint: [number, number] = [(anchor.x + anchor.w / 2) / state.width, (anchor.y + anchor.h / 2) / state.height];
-  return freeSpot(state, w, h, hint, rng);
+  return freeSpot(state, w, h, hint, rng, obstacles);
+}
+
+/** City worlds carry a procedural layout; new things must fit around it (or claim a lot / a road). */
+function cityContext(state: WorldState): { layout: CityLayout; taken: Set<string> } | null {
+  if (!state.citySeed) return null;
+  const layout = generateCity(state.citySeed, state.zones ?? [], state.width);
+  const taken = new Set(state.entities.map((e) => (e.meta as { lotId?: string }).lotId).filter((v): v is string => Boolean(v)));
+  return { layout, taken };
 }
 
 /* ----------------------------- planner ------------------------------------ */
@@ -196,7 +207,9 @@ export class HeuristicPlanner implements WorldPlanner {
       const { hint: region, zone } = resolveRegion(text, state, false);
       const afterTo = text.split(/\b(?:to|near|next to|beside|by)\b/)[1] ?? "";
       const anchor = afterTo ? findReferenced(afterTo, state, target.id) : null;
-      const spot = anchor ? nearSpot(anchor, target.w, target.h, state, rng) : freeSpot(state, target.w, target.h, region, rng);
+      const cityM = cityContext(state);
+      const obstaclesM = cityM && target.kind !== "road" && target.kind !== "water" ? cityObstacles(cityM.layout, cityM.taken) : [];
+      const spot = anchor ? nearSpot(anchor, target.w, target.h, state, rng, obstaclesM) : freeSpot(state, target.w, target.h, region, rng, obstaclesM);
       return {
         ops: [{ op: "move", id: target.id, x: spot.x, y: spot.y }],
         summary: `moved the ${target.name}${anchor ? ` next to the ${anchor.name}` : zone ? ` to the ${zone.name}` : region ? " across the map" : ""}`,
@@ -238,12 +251,44 @@ export class HeuristicPlanner implements WorldPlanner {
     const name = nameFor(text, detected.word, color);
     const ops: WorldOp[] = [];
     let working = state;
+    const city = cityContext(state);
     for (let i = 0; i < count; i++) {
       const jitter = 0.85 + rng() * 0.3;
-      const w = Math.round(detected.size.w * jitter);
-      const h = Math.round(detected.size.h * jitter);
-      const spot = anchor ? nearSpot(anchor, w, h, working, rng) : freeSpot(working, w, h, region, rng);
+      let w = Math.round(detected.size.w * jitter);
+      let h = Math.round(detected.size.h * jitter);
       const baseHeight = DEFAULT_HEIGHT_BY_KIND[detected.kind];
+      let height = baseHeight > 0 ? Math.round(baseHeight * jitter) : 0;
+      let rotation = detected.kind === "vehicle" || detected.kind === "road" ? Math.round(rng() * 4) * 90 : 0;
+      const meta: Record<string, unknown> = { prompt };
+      let spot: { x: number; y: number } | null = null;
+
+      if (city && detected.kind === "building") {
+        // Buildings claim a free lot in the procedural city, nearest to where the prompt pointed.
+        const target = anchor
+          ? { x: anchor.x + anchor.w / 2, y: anchor.y + anchor.h / 2 }
+          : region
+            ? { x: region[0] * state.width, y: region[1] * state.height }
+            : { x: rng() * state.width, y: rng() * state.height };
+        const lot = nearestFreeLot(city.layout, target.x, target.y, city.taken, zone?.id);
+        if (lot) {
+          city.taken.add(lot.id);
+          spot = { x: Math.round(lot.x), y: Math.round(lot.y) };
+          w = Math.round(lot.w);
+          h = Math.round(lot.h);
+          height = lot.zoneId === "central" ? Math.max(height, lot.height) : Math.max(24, Math.round(lot.height * 1.4));
+          meta.lotId = lot.id;
+        }
+      }
+      if (!spot) {
+        const obstacles = city && detected.kind !== "road" && detected.kind !== "water" ? cityObstacles(city.layout, city.taken) : [];
+        spot = anchor ? nearSpot(anchor, w, h, working, rng, obstacles) : freeSpot(working, w, h, region, rng, obstacles);
+        if (city && detected.kind === "vehicle") {
+          const snapped = snapToRoad(city.layout, spot.x + w / 2, spot.y + h / 2);
+          spot = { x: Math.round(snapped.x - w / 2), y: Math.round(snapped.y - h / 2) };
+          rotation = snapped.axis === "v" ? 90 : 0;
+        }
+      }
+
       const entity: WorldEntity = {
         id: newId(),
         kind: detected.kind,
@@ -252,11 +297,11 @@ export class HeuristicPlanner implements WorldPlanner {
         y: spot.y,
         w,
         h,
-        rotation: detected.kind === "vehicle" || detected.kind === "road" ? Math.round(rng() * 4) * 90 : 0,
-        height: baseHeight > 0 ? Math.round(baseHeight * jitter) : 0,
+        rotation,
+        height,
         color,
         spriteUrl: null,
-        meta: { prompt },
+        meta,
       };
       ops.push({ op: "add", entity });
       working = { ...working, entities: [...working.entities, entity] };

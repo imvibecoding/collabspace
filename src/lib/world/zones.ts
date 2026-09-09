@@ -66,7 +66,7 @@ export function zoneHint(zone: WorldZone, worldSize: number): [number, number] {
  * quarters. Covers the whole map with no gaps or overlaps.
  */
 export function melbourneZones(size: number): WorldZone[] {
-  const band = Math.round(size * 0.32);
+  const band = Math.round(size * 0.3);
   return [
     {
       id: "north",

@@ -74,7 +74,7 @@ export async function ensureWorld(room: Room): Promise<{ room: Room; world: Worl
   const zones = isCity ? melbourneZones(DEFAULT_WORLD_SIZE) : [];
   const gen = getBaseWorldGenerator();
   const base = await gen.generate(prompt, zones);
-  let world: WorldState = { ...emptyWorld(base.theme), backgroundUrl: base.backgroundUrl, zones };
+  let world: WorldState = { ...emptyWorld(base.theme), backgroundUrl: base.backgroundUrl, zones, citySeed: isCity ? room.id : undefined };
 
   if (isCity) {
     for (const seed of melbourneSeedPrompts()) {

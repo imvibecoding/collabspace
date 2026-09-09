@@ -9,6 +9,7 @@ import { appealAction, downvoteAction, forkAction, snapshotAction, submitPromptA
 import { useRoomRealtime } from "./use-room-realtime";
 import { HistoryList, type HistoryRow } from "./history-list";
 import { WorldView, type EntityMeta } from "./world-view";
+import { World3DClient } from "./world-3d-client";
 
 type Lane = "base" | "premium" | "instant";
 
@@ -54,6 +55,9 @@ export function WorldRoom(props: {
   const [lane, setLane] = useState<Lane>("base");
   const [selected, setSelected] = useState<WorldEntity | null>(null);
   const [scrub, setScrub] = useState<number | null>(null); // null = live
+  const [hour, setHour] = useState<number | null>(null); // null = live Melbourne clock
+  const [rain, setRain] = useState(false);
+  const [flat, setFlat] = useState(false); // 2D map fallback
   const [submitState, submitPrompt, submitting] = useActionState<ActionState, FormData>(submitPromptAction, {});
   const [voteState, vote, voting] = useActionState<ActionState, FormData>(downvoteAction, {});
   const [appealState, doAppeal, appealing] = useActionState<ActionState, FormData>(appealAction, {});
@@ -79,12 +83,49 @@ export function WorldRoom(props: {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <section className="space-y-3">
-        <WorldView
-          world={shownWorld}
-          selectedId={selected?.id}
-          onSelect={setSelected}
-          highlightSubmissionId={scrubEntry?.id ?? null}
-        />
+        {flat ? (
+          <WorldView world={shownWorld} selectedId={selected?.id} onSelect={setSelected} highlightSubmissionId={scrubEntry?.id ?? null} />
+        ) : (
+          <World3DClient
+            world={shownWorld}
+            selectedId={selected?.id}
+            onSelect={setSelected}
+            highlightSubmissionId={scrubEntry?.id ?? null}
+            hourOverride={hour}
+            rain={rain}
+          />
+        )}
+
+        {/* Scene controls */}
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <label className="flex items-center gap-2">
+            <span className="text-zinc-500">Time</span>
+            <input
+              type="range"
+              min={0}
+              max={24}
+              step={0.25}
+              value={hour ?? 12}
+              onChange={(e) => setHour(Number(e.target.value))}
+              className="w-40"
+              aria-label="Time of day"
+              disabled={hour === null}
+            />
+            <button
+              type="button"
+              onClick={() => setHour(hour === null ? 20 : null)}
+              className={`rounded border px-2 py-0.5 ${hour === null ? "border-emerald-500 text-emerald-600" : "border-zinc-300 dark:border-zinc-700"}`}
+            >
+              {hour === null ? "Live clock" : "Scrubbing — back to live"}
+            </button>
+          </label>
+          <label className="flex items-center gap-1">
+            <input type="checkbox" checked={rain} onChange={(e) => setRain(e.target.checked)} /> Rain
+          </label>
+          <button type="button" onClick={() => setFlat((v) => !v)} className="rounded border border-zinc-300 px-2 py-0.5 dark:border-zinc-700">
+            {flat ? "3D city" : "2D map"}
+          </button>
+        </div>
 
         {/* Timelapse */}
         {props.timeline.length > 0 && (
