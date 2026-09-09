@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createRoom } from "@/lib/rooms/service";
+import { InsufficientCreditsError } from "@/lib/credits/ledger";
 
 export async function createRoomAction(formData: FormData) {
   const supabase = await createClient();
@@ -19,6 +20,14 @@ export async function createRoomAction(formData: FormData) {
   const visibility = formData.get("visibility") === "public" ? "public" : "private";
   if (!name) redirect("/rooms/new?error=Name%20is%20required");
 
-  const room = await createRoom({ ownerId: user.id, name, type, visibility, worldPrompt: worldPrompt || undefined, worldCity });
+  let room;
+  try {
+    room = await createRoom({ ownerId: user.id, name, type, visibility, worldPrompt: worldPrompt || undefined, worldCity });
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) {
+      redirect(`/rooms/new?error=${encodeURIComponent(`Not enough credits to create that room (short ${e.shortfall}).`)}`);
+    }
+    throw e;
+  }
   redirect(`/rooms/${room.slug}`);
 }

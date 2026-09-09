@@ -1,4 +1,5 @@
 import { createRoomAction } from "./actions";
+import { ROOM_COST_CREDITS } from "@/lib/rooms/service";
 
 export default async function NewRoomPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
@@ -16,15 +17,15 @@ export default async function NewRoomPage({ searchParams }: { searchParams: Prom
             <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-300 p-3 dark:border-zinc-700">
               <input type="radio" name="type" value="world" defaultChecked />
               <span>
-                <span className="font-medium">2D world</span>
+                <span className="font-medium">City world · {ROOM_COST_CREDITS.world} credits</span>
                 <br />
-                <span className="text-xs text-zinc-500">Top-down world people grow with prompts.</span>
+                <span className="text-xs text-zinc-500">A 3D city, laid out in districts, that people grow with prompts.</span>
               </span>
             </label>
             <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-300 p-3 dark:border-zinc-700">
               <input type="radio" name="type" value="art" />
               <span>
-                <span className="font-medium">Art prompt wall</span>
+                <span className="font-medium">Art prompt wall · {ROOM_COST_CREDITS.art} credits</span>
                 <br />
                 <span className="text-xs text-zinc-500">Shared image canvas driven by queued prompts.</span>
               </span>
@@ -32,20 +33,20 @@ export default async function NewRoomPage({ searchParams }: { searchParams: Prom
             <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-300 p-3 dark:border-zinc-700">
               <input type="radio" name="type" value="kanban" />
               <span>
-                <span className="font-medium">Kanban board</span>
+                <span className="font-medium">Kanban board · free</span>
                 <br />
-                <span className="text-xs text-zinc-500">Cards with lock-while-editing. No AI cost.</span>
+                <span className="text-xs text-zinc-500">Cards with lock-while-editing. No generation, no cost.</span>
               </span>
             </label>
           </div>
         </fieldset>
         <label className="block text-sm">
           <span className="text-zinc-600 dark:text-zinc-400">World prompt (worlds only)</span>
-          <input name="world_prompt" maxLength={200} placeholder="a rainy neon city by the harbour" className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700" />
-          <span className="text-xs text-zinc-500">Generates the base map. Everyone else adds to it with prompts.</span>
+          <input name="world_prompt" maxLength={200} placeholder="a rainy harbour city at dusk" className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700" />
+          <span className="text-xs text-zinc-500">Sets the character of the base city. Everyone else adds to it with prompts.</span>
         </label>
         <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" name="world_city" value="1" className="mt-1" />
+          <input type="checkbox" name="world_city" value="1" defaultChecked className="mt-1" />
           <span>
             <span className="font-medium">Lay it out as a city (worlds only)</span>
             <br />
@@ -66,7 +67,8 @@ export default async function NewRoomPage({ searchParams }: { searchParams: Prom
             </label>
           </div>
           <p className="mt-2 text-xs text-zinc-500">
-            Private rooms bill at pay-per-use rates; free credits only work in public rooms.
+            Private rooms bill at pay-per-use rates; free credits only work in public rooms. Creating a room is
+            charged up front — it builds a whole city and then hosts it.
           </p>
         </fieldset>
         {error && <p className="text-sm text-red-600">{error}</p>}

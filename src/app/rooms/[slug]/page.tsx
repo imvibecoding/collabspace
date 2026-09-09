@@ -126,13 +126,12 @@ export default async function RoomPage({ params }: { params: Promise<{ slug: str
 
   /* ------------------------------- World ---------------------------------- */
   if (room.type === "world" && ensured) {
-    const [timeline, { data: myFlags }, { data: latestSnap }] = await Promise.all([
+    const [timeline, { data: myFlags }] = await Promise.all([
       worldTimeline(room.id),
       user ? supabase.from("moderation_flags").select("submission_id").eq("room_id", room.id).eq("reporter_id", user.id) : Promise.resolve({ data: [] }),
-      supabase.from("snapshots").select("id").eq("room_id", room.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     return (
-      <main className="mx-auto w-full max-w-6xl space-y-6 p-6">
+      <main className="mx-auto w-full max-w-[1600px] space-y-6 p-6">
         {header}
         <WorldRoom
           room={room}
@@ -146,7 +145,6 @@ export default async function RoomPage({ params }: { params: Promise<{ slug: str
           pending={pendingView}
           myDownvotes={(myFlags ?? []).map((f) => f.submission_id).filter((s): s is string => Boolean(s))}
           myReverted={(myReverted ?? []).map((r) => ({ id: r.id, prompt: r.prompt }))}
-          latestSnapshotId={latestSnap?.id ?? null}
           history={history ?? []}
         />
       </main>

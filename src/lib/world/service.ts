@@ -212,40 +212,9 @@ export async function worldTimeline(roomId: string, limit = 300) {
   });
 }
 
-/**
- * Fork: a new private, invite-only world room seeded from a snapshot
- * (brief §2.5). The forker owns it; the public canonical room is untouched.
+/*
+ * Forking is deliberately not offered: worlds stay on collabspace rather than
+ * being copied out into private spin-offs. Snapshots (read-only, on-site) are
+ * the sanctioned way to keep a moment.
  */
-export async function forkSnapshot(userId: string, snapshotId: string, name?: string) {
-  const admin = createAdminClient();
-  const { data: snap } = await admin.from("snapshots").select("*, rooms!snapshots_room_id_fkey(name, rules, type)").eq("id", snapshotId).single();
-  if (!snap) return { ok: false as const, message: "Snapshot not found" };
-  const src = snap.rooms as { name: string; rules: Json; type: string } | null;
-  const rawState = snap.state as unknown as { world?: WorldState } | null;
-  const world = normalizeWorld(rawState?.world);
-  if (src?.type !== "world" || !world) return { ok: false as const, message: "Only world snapshots can be forked" };
 
-  const base = (name?.trim() || `${src.name} (fork)`).slice(0, 80);
-  const slug = `${base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "world"}-${Math.random().toString(36).slice(2, 7)}`;
-  const { data: room, error } = await admin
-    .from("rooms")
-    .insert({
-      slug,
-      name: base,
-      type: "world",
-      visibility: "private",
-      mode: "freeform",
-      owner_id: userId,
-      rules: src.rules ?? {},
-      world: world as unknown as Json,
-      world_initial: world as unknown as Json,
-      current_asset_url: world.backgroundUrl,
-      forked_from_snapshot: snap.id,
-    })
-    .select("*")
-    .single();
-  if (error || !room) return { ok: false as const, message: error?.message ?? "Could not fork" };
-  await admin.from("room_participants").insert({ room_id: room.id, user_id: userId, role: "owner" });
-  await history(room.id, userId, "room.forked", null, { from_snapshot: snap.id, from_room: snap.room_id });
-  return { ok: true as const, room };
-}

@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/immutability -- three.js cameras/objects are mutated in place by design */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, OrthographicCamera } from "@react-three/drei";
@@ -12,6 +13,9 @@ import type { WorldEntity, WorldState } from "@/lib/world/types";
 import { zoneCenter } from "@/lib/world/zones";
 
 export type EntityMeta = { submissionId?: string; userId?: string; prompt?: string; lotId?: string };
+
+/** "iso" = the angled city view; "top" = straight-down bird's-eye of the same world. */
+export type ViewMode = "iso" | "top";
 
 /* ----------------------------- coordinates ------------------------------- */
 // World: x east, y south (top-down). Three: X east, Z south, Y up, origin at the map centre.
@@ -85,6 +89,9 @@ function makeGroundTexture(world: WorldState, city: CityLayout) {
     g.fillStyle = "#5f8a4a";
     g.fillRect(p.x * k, p.y * k, p.w * k, p.h * k);
   }
+  // Footpaths first, then the carriageway on top, so every block gets a kerb.
+  g.fillStyle = "#9a978f";
+  for (const r of city.roads) g.fillRect((r.x - 3) * k, (r.y - 3) * k, (r.w + 6) * k, (r.h + 6) * k);
   for (const r of city.roads) {
     g.fillStyle = "#3d3f42";
     g.fillRect(r.x * k, r.y * k, r.w * k, r.h * k);
@@ -727,20 +734,132 @@ function Entity({
   }
 }
 
-function FitCamera({ world }: { world: WorldState }) {
-  const { camera, size } = useThree();
-  const fitted = useRef(false);
-    // eslint-disable-next-line -- three.js camera is mutated in place by design
+/** Gradient sky dome — reads far better than a flat clear colour at dawn/dusk. */
+function SkyDome({ day }: { day: Daylight }) {
+  const pal = palette(day);
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        uniforms: { top: { value: new THREE.Color("#ffffff") }, bottom: { value: new THREE.Color("#ffffff") } },
+        vertexShader: "varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+        fragmentShader:
+          "uniform vec3 top; uniform vec3 bottom; varying vec3 vP; void main(){ float h = clamp(normalize(vP).y * 0.5 + 0.5, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, pow(h, 0.75)), 1.0); }",
+      }),
+    [],
+  );
   useEffect(() => {
-    // Fit once so a realtime refresh doesn't yank the view back after the user zoomed.
-    if (fitted.current) return;
-    fitted.current = true;
+    mat.uniforms.top.value.set(pal.sky);
+    mat.uniforms.bottom.value.set(pal.horizon);
+  }, [mat, pal.sky, pal.horizon]);
+  useEffect(() => () => mat.dispose(), [mat]);
+  return (
+    <mesh material={mat} scale={[2600, 2600, 2600]} renderOrder={-1}>
+      <sphereGeometry args={[1, 24, 16]} />
+    </mesh>
+  );
+}
+
+/** Rooftop plant: AC units and water tanks on anything tall enough to see them on. */
+function RoofClutter({ world, city, takenLots }: { world: WorldState; city: CityLayout; takenLots: Set<string> }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const items = useMemo(() => {
+    const out: Array<{ x: number; y: number; w: number; d: number; h: number; top: number }> = [];
+    let s = 99;
+    const rnd = () => ((s = (s * 1664525 + 1013904223) % 4294967296) / 4294967296);
+    for (const lot of city.lots) {
+      if (takenLots.has(lot.id) || lot.height < 22) continue;
+      const n = 1 + Math.floor(rnd() * 3);
+      for (let i = 0; i < n; i++) {
+        const w = Math.min(lot.w * 0.5, 3 + rnd() * 5);
+        const d = Math.min(lot.h * 0.5, 3 + rnd() * 5);
+        out.push({ x: lot.x + rnd() * Math.max(0.1, lot.w - w), y: lot.y + rnd() * Math.max(0.1, lot.h - d), w, d, h: 1.5 + rnd() * 3.5, top: lot.height });
+      }
+    }
+    return out.slice(0, 1500);
+  }, [city, takenLots]);
+  useEffect(() => {
+    const m = new THREE.Object3D();
+    items.forEach((it, i) => {
+      m.position.set(toX(world, it.x + it.w / 2), it.top + it.h / 2, toZ(world, it.y + it.d / 2));
+      m.scale.set(it.w, it.h, it.d);
+      m.updateMatrix();
+      ref.current?.setMatrixAt(i, m.matrix);
+    });
+    if (ref.current) ref.current.instanceMatrix.needsUpdate = true;
+  }, [world, items]);
+  if (!items.length) return null;
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, items.length]} castShadow receiveShadow>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial color="#8b8f93" roughness={0.85} />
+    </instancedMesh>
+  );
+}
+
+/**
+ * Camera: initial fit, iso vs straight-down view, and animated flights when
+ * someone picks an area. Signals `onReady` once the first frames have drawn so
+ * the parent can drop its loading overlay.
+ */
+function CameraRig({
+  world,
+  view,
+  focus,
+  onReady,
+}: {
+  world: WorldState;
+  view: ViewMode;
+  focus: { x: number; z: number; key: number } | null;
+  onReady?: () => void;
+}) {
+  const { camera, size, controls } = useThree();
+  const fitted = useRef(false);
+  const frames = useRef(0);
+  const goal = useRef<{ target: THREE.Vector3; zoom: number } | null>(null);
+
+  const baseZoom = useMemo(
+    () => Math.min(size.width / (world.width * (view === "top" ? 1.05 : 1.2)), size.height / (world.height * (view === "top" ? 1.05 : 0.78))),
+    [size.width, size.height, world.width, world.height, view],
+  );
+
+  useEffect(() => {
     const cam = camera as THREE.OrthographicCamera;
-    // The whole map's iso diagonal ≈ 1.45 × width. Leave a little margin.
-    // eslint-disable-next-line react-hooks/immutability -- three.js objects are mutated in place by design
-    cam.zoom = Math.min(size.width / (world.width * 1.25), size.height / (world.height * 0.8));
+    const ctrl = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
+    const t = ctrl?.target ?? new THREE.Vector3();
+    const d = 1200;
+    // Keep whatever the camera is centred on when switching views. In bird's-eye
+    // the camera sits directly above with a hair of +Z offset, which pins the
+    // azimuth at zero so the map reads as a north-up plan rather than a rotated one.
+    if (view === "top") cam.position.set(t.x, t.y + d, t.z + 0.0001);
+    else cam.position.set(t.x + d * 0.72, t.y + d * 0.62, t.z + d * 0.72);
+    if (!fitted.current) {
+      cam.zoom = baseZoom;
+      fitted.current = true;
+    }
     cam.updateProjectionMatrix();
-  }, [camera, size, world.width, world.height]);
+    ctrl?.update();
+  }, [camera, controls, view, baseZoom]);
+
+  useEffect(() => {
+    if (!focus) return;
+    goal.current = { target: new THREE.Vector3(focus.x, 0, focus.z), zoom: baseZoom * 2.4 };
+  }, [focus, baseZoom]);
+
+  useFrame(() => {
+    frames.current += 1;
+    if (frames.current === 4) onReady?.();
+    const ctrl = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
+    if (!ctrl || !goal.current) return;
+    const cam = camera as THREE.OrthographicCamera;
+    ctrl.target.lerp(goal.current.target, 0.1);
+    cam.zoom += (goal.current.zoom - cam.zoom) * 0.1;
+    cam.updateProjectionMatrix();
+    ctrl.update();
+    if (ctrl.target.distanceTo(goal.current.target) < 1.5 && Math.abs(cam.zoom - goal.current.zoom) < 0.02) goal.current = null;
+  });
   return null;
 }
 
@@ -767,12 +886,14 @@ function Scene({
   return (
     <>
       <Lighting day={day} />
+      <SkyDome day={day} />
       <Stars day={day} />
       <group onClick={() => onSelect?.(null)}>
         <Ground world={world} city={city} />
         <Water world={world} city={city} day={day} />
       </group>
       <CityBuildings world={world} city={city} takenLots={takenLots} day={day} />
+      <RoofClutter world={world} city={city} takenLots={takenLots} />
       <Landmarks world={world} city={city} day={day} />
       <Trees world={world} city={city} />
       <Lamps world={world} city={city} day={day} />
@@ -800,6 +921,9 @@ export function World3D({
   highlightSubmissionId,
   hourOverride = null,
   rain = false,
+  view = "iso",
+  focusZoneId = null,
+  height,
   className,
 }: {
   world: WorldState;
@@ -809,9 +933,15 @@ export function World3D({
   /** Local Melbourne hour to render (0..24), or null for the live clock. */
   hourOverride?: number | null;
   rain?: boolean;
+  view?: ViewMode;
+  /** Set to an area id (plus a nonce) to fly the camera there. */
+  focusZoneId?: { id: string; key: number } | null;
+  /** CSS height; falls back to a 16:10 box. */
+  height?: string;
   className?: string;
 }) {
   const [now, setNow] = useState(() => new Date());
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(t);
@@ -824,10 +954,23 @@ export function World3D({
     () => generateCity(world.citySeed ?? "city", JSON.parse(zonesKey), world.width),
     [world.citySeed, zonesKey, world.width],
   );
-  const labels = (world.zones ?? []).map((z) => ({ id: z.id, name: z.name, subtitle: z.subtitle, c: zoneCenter(z) }));
+
+  const focus = useMemo(() => {
+    if (!focusZoneId) return null;
+    const zone = (world.zones ?? []).find((z) => z.id === focusZoneId.id);
+    if (!zone) return null;
+    const c = zoneCenter(zone);
+    return { x: toX(world, c.x), z: toZ(world, c.y), key: focusZoneId.key };
+  }, [focusZoneId, world]);
+
+  const clock = `${String(Math.floor(day.localHour)).padStart(2, "0")}:${String(Math.floor((day.localHour % 1) * 60)).padStart(2, "0")}`;
+  const phase = day.phase === "night" ? "Night" : day.phase === "day" ? "Day" : day.phase === "dawn" ? "Dawn" : "Dusk";
 
   return (
-    <div className={`relative w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900 dark:border-zinc-800 ${className ?? ""}`} style={{ aspectRatio: "16 / 10" }}>
+    <div
+      className={`relative w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900 dark:border-zinc-800 ${className ?? ""}`}
+      style={height ? { height } : { aspectRatio: "16 / 10" }}
+    >
       <Canvas
         shadows
         dpr={[1, 1.5]}
@@ -835,32 +978,39 @@ export function World3D({
         onPointerMissed={() => onSelect?.(null)}
       >
         <OrthographicCamera makeDefault position={[900, 760, 900]} near={-2000} far={5000} zoom={0.5} />
-        <FitCamera world={world} />
+        <CameraRig world={world} view={view} focus={focus} onReady={() => setReady(true)} />
         <OrbitControls
           makeDefault
           enableDamping
           dampingFactor={0.08}
-          minZoom={0.35}
-          maxZoom={6}
-          minPolarAngle={Math.PI * 0.18}
-          maxPolarAngle={Math.PI * 0.42}
+          enableRotate={view === "iso"}
+          minZoom={0.3}
+          maxZoom={14}
+          minPolarAngle={view === "top" ? 0 : Math.PI * 0.14}
+          maxPolarAngle={view === "top" ? 0 : Math.PI * 0.45}
           screenSpacePanning={false}
           target={[0, 0, 0]}
         />
         <Scene world={world} city={city} day={day} rain={rain} selectedId={selectedId} highlightSubmissionId={highlightSubmissionId} onSelect={onSelect} />
       </Canvas>
+
+      {!ready && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-zinc-950 text-sm text-zinc-300">
+          <svg className="h-6 w-6 animate-spin text-zinc-400" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          Building the city…
+        </div>
+      )}
+
       <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/45 px-2 py-1 text-[11px] text-white backdrop-blur">
-        {day.phase === "night" ? "Night" : day.phase === "day" ? "Day" : day.phase === "dawn" ? "Dawn" : "Dusk"} · Melbourne {String(Math.floor(day.localHour)).padStart(2, "0")}:{String(Math.floor((day.localHour % 1) * 60)).padStart(2, "0")}
-        {hourOverride !== null ? " (scrubbed)" : ""}
+        {phase} · Melbourne {clock}
+        {hourOverride !== null ? " · preview" : " · live"}
       </div>
-      <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-1 text-[10px] text-white/80">
-        {labels.map((l) => (
-          <span key={l.id} className="rounded bg-black/40 px-1.5 py-0.5" title={l.subtitle}>
-            {l.name}
-          </span>
-        ))}
+      <div className="pointer-events-none absolute bottom-3 right-3 text-[10px] text-white/60">
+        {view === "top" ? "wheel to zoom · drag to pan" : "drag to orbit · wheel to zoom · right-drag to pan"}
       </div>
-      <div className="pointer-events-none absolute bottom-3 right-3 text-[10px] text-white/60">drag to orbit · wheel to zoom · right-drag to pan</div>
     </div>
   );
 }

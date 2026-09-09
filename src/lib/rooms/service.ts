@@ -9,6 +9,17 @@ import { ensureWorld, roomWorld } from "@/lib/world/service";
 export const QUEUE_SUGGESTION_THRESHOLD = 4;
 export const PRINT_PRICE_CREDITS = 5;
 
+/**
+ * Standing up a room costs credits: it generates a whole city (or canvas) up
+ * front and then occupies hosting, so it's priced well above a single prompt.
+ * Kanban is free — no generation at all.
+ */
+export const ROOM_COST_CREDITS: Record<Enums<"room_type">, number> = {
+  world: 60,
+  art: 25,
+  kanban: 0,
+};
+
 export function slugify(name: string): string {
   const base = name
     .toLowerCase()
@@ -57,12 +68,25 @@ export async function createRoom(input: {
       rules: isArt
         ? { max_prompt_words: 6 }
         : isWorld
-          ? { max_prompt_words: 12, world_prompt: (input.worldPrompt ?? input.name).trim().slice(0, 200), city: Boolean(input.worldCity) }
+          ? { max_prompt_words: 12, world_prompt: (input.worldPrompt ?? input.name).trim().slice(0, 200), city: input.worldCity !== false }
           : {},
     })
     .select("*")
     .single();
   if (error || !room) throw error ?? new Error("Could not create room");
+
+  // Charge for the room now that it exists, so a public room can draw on free
+  // credits. If they can't cover it, roll the room back rather than leave a
+  // half-created one behind.
+  const cost = ROOM_COST_CREDITS[input.type] ?? 0;
+  if (cost > 0) {
+    try {
+      await spend({ userId: input.ownerId, kind: "image", amount: cost, reason: "room_created", roomId: room.id });
+    } catch (e) {
+      await admin.from("rooms").delete().eq("id", room.id);
+      throw e;
+    }
+  }
 
   await admin.from("room_participants").insert({ room_id: room.id, user_id: input.ownerId, role: "owner" });
   if (input.type === "kanban") {

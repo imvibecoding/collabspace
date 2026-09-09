@@ -5,10 +5,10 @@ import { useActionState, useEffect, useMemo, useState } from "react";
 import type { Tables } from "@/lib/supabase/types";
 import type { WorldEntity, WorldPatch, WorldState } from "@/lib/world/types";
 import { replay } from "@/lib/world/patch";
-import { appealAction, downvoteAction, forkAction, snapshotAction, submitPromptAction, type ActionState } from "@/app/rooms/[slug]/actions";
+import { appealAction, downvoteAction, snapshotAction, submitPromptAction, type ActionState } from "@/app/rooms/[slug]/actions";
 import { useRoomRealtime } from "./use-room-realtime";
 import { HistoryList, type HistoryRow } from "./history-list";
-import { WorldView, type EntityMeta } from "./world-view";
+import type { EntityMeta, ViewMode } from "./world-3d";
 import { World3DClient } from "./world-3d-client";
 
 type Lane = "base" | "premium" | "instant";
@@ -46,7 +46,6 @@ export function WorldRoom(props: {
   pending: Array<{ id: string; lane: string; prompt: string; bid: number; mine: boolean; author: string }>;
   myDownvotes: string[];
   myReverted: Array<{ id: string; prompt: string }>;
-  latestSnapshotId: string | null;
   history: HistoryRow[];
 }) {
   const { room } = props;
@@ -57,12 +56,12 @@ export function WorldRoom(props: {
   const [scrub, setScrub] = useState<number | null>(null); // null = live
   const [hour, setHour] = useState<number | null>(null); // null = live Melbourne clock
   const [rain, setRain] = useState(false);
-  const [flat, setFlat] = useState(false); // 2D map fallback
+  const [view, setView] = useState<ViewMode>("iso");
+  const [focusZoneId, setFocusZoneId] = useState<{ id: string; key: number } | null>(null);
   const [submitState, submitPrompt, submitting] = useActionState<ActionState, FormData>(submitPromptAction, {});
   const [voteState, vote, voting] = useActionState<ActionState, FormData>(downvoteAction, {});
   const [appealState, doAppeal, appealing] = useActionState<ActionState, FormData>(appealAction, {});
   const [snapState, snapshot, snapping] = useActionState<ActionState, FormData>(snapshotAction, {});
-  const [forkState, fork, forking] = useActionState<ActionState, FormData>(forkAction, {});
 
   const shownWorld = useMemo(
     () => (scrub === null ? props.world : replay(props.initial, props.timeline.map((t) => t.patch), scrub)),
@@ -81,50 +80,105 @@ export function WorldRoom(props: {
   const selEntry = selMeta.submissionId ? props.timeline.find((t) => t.id === selMeta.submissionId) : undefined;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
       <section className="space-y-3">
-        {flat ? (
-          <WorldView world={shownWorld} selectedId={selected?.id} onSelect={setSelected} highlightSubmissionId={scrubEntry?.id ?? null} />
-        ) : (
-          <World3DClient
-            world={shownWorld}
-            selectedId={selected?.id}
-            onSelect={setSelected}
-            highlightSubmissionId={scrubEntry?.id ?? null}
-            hourOverride={hour}
-            rain={rain}
-          />
+        <World3DClient
+          world={shownWorld}
+          selectedId={selected?.id}
+          onSelect={setSelected}
+          highlightSubmissionId={scrubEntry?.id ?? null}
+          hourOverride={hour}
+          rain={rain}
+          view={view}
+          focusZoneId={focusZoneId}
+          height="min(74vh, 820px)"
+        />
+
+        {/* Areas — click to fly there */}
+        {(shownWorld.zones ?? []).length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-zinc-500">Areas</span>
+            {(shownWorld.zones ?? []).map((z) => (
+              <button
+                key={z.id}
+                type="button"
+                title={z.subtitle}
+                onClick={() => setFocusZoneId({ id: z.id, key: Date.now() })}
+                className={`rounded-full border px-2.5 py-1 transition-colors ${
+                  focusZoneId?.id === z.id
+                    ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-black"
+                    : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                }`}
+              >
+                {z.name}
+              </button>
+            ))}
+            {focusZoneId && (
+              <button type="button" onClick={() => setFocusZoneId(null)} className="text-zinc-500 underline">
+                whole city
+              </button>
+            )}
+          </div>
         )}
 
         {/* Scene controls */}
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <label className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-4 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-zinc-500">View</span>
+            <div className="inline-flex overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700">
+              {(["iso", "top"] as ViewMode[]).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setView(v)}
+                  className={`px-2.5 py-1 ${view === v ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+                >
+                  {v === "iso" ? "3D city" : "Bird's-eye"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
             <span className="text-zinc-500">Time</span>
-            <input
-              type="range"
-              min={0}
-              max={24}
-              step={0.25}
-              value={hour ?? 12}
-              onChange={(e) => setHour(Number(e.target.value))}
-              className="w-40"
-              aria-label="Time of day"
-              disabled={hour === null}
-            />
-            <button
-              type="button"
-              onClick={() => setHour(hour === null ? 20 : null)}
-              className={`rounded border px-2 py-0.5 ${hour === null ? "border-emerald-500 text-emerald-600" : "border-zinc-300 dark:border-zinc-700"}`}
-            >
-              {hour === null ? "Live clock" : "Scrubbing — back to live"}
-            </button>
-          </label>
-          <label className="flex items-center gap-1">
+            <div className="inline-flex overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700">
+              <button
+                type="button"
+                onClick={() => setHour(null)}
+                className={`px-2.5 py-1 ${hour === null ? "bg-emerald-600 text-white" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+              >
+                Live in Melbourne
+              </button>
+              <button
+                type="button"
+                onClick={() => setHour((h) => (h === null ? 20 : h))}
+                className={`px-2.5 py-1 ${hour !== null ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+              >
+                Preview a time
+              </button>
+            </div>
+            {hour !== null && (
+              <>
+                <input
+                  type="range"
+                  min={0}
+                  max={23.75}
+                  step={0.25}
+                  value={hour}
+                  onChange={(e) => setHour(Number(e.target.value))}
+                  className="w-36"
+                  aria-label="Time of day"
+                />
+                <span className="w-12 tabular-nums text-zinc-600 dark:text-zinc-300">
+                  {String(Math.floor(hour)).padStart(2, "0")}:{String(Math.round((hour % 1) * 60)).padStart(2, "0")}
+                </span>
+              </>
+            )}
+          </div>
+
+          <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={rain} onChange={(e) => setRain(e.target.checked)} /> Rain
           </label>
-          <button type="button" onClick={() => setFlat((v) => !v)} className="rounded border border-zinc-300 px-2 py-0.5 dark:border-zinc-700">
-            {flat ? "3D city" : "2D map"}
-          </button>
         </div>
 
         {/* Timelapse */}
@@ -193,15 +247,6 @@ export function WorldRoom(props: {
                 Buy a print (5)
               </button>
             </form>
-            {props.latestSnapshotId && (
-              <form action={fork} className="flex items-center gap-2">
-                <input type="hidden" name="snapshot_id" value={props.latestSnapshotId} />
-                <input type="hidden" name="slug" value={room.slug} />
-                <button disabled={forking} className="rounded-md bg-zinc-900 px-3 py-1 text-white dark:bg-zinc-100 dark:text-black">
-                  Fork latest snapshot → private world
-                </button>
-              </form>
-            )}
             {snapState.error && <span className="text-red-600">{snapState.error}</span>}
             {snapState.message && (
               <span className="text-emerald-600">
@@ -211,7 +256,6 @@ export function WorldRoom(props: {
                 </Link>
               </span>
             )}
-            {forkState.error && <span className="text-red-600">{forkState.error}</span>}
           </div>
         )}
       </section>
