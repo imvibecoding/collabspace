@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import type { Tables } from "@/lib/supabase/types";
 import type { WorldEntity, WorldPatch, WorldState } from "@/lib/world/types";
@@ -164,9 +165,9 @@ export function WorldRoom(props: {
             {snapState.message && (
               <span className="text-emerald-600">
                 {snapState.message.split(": ")[0]}:{" "}
-                <a className="underline" href={snapState.message.split(": ")[1]}>
+                <Link className="underline" href={snapState.message.split(": ")[1]}>
                   open
-                </a>
+                </Link>
               </span>
             )}
             {forkState.error && <span className="text-red-600">{forkState.error}</span>}
@@ -222,9 +223,9 @@ export function WorldRoom(props: {
               "You are not a member of this world."
             ) : (
               <>
-                <a className="underline" href={`/login?next=/rooms/${room.slug}`}>
+                <Link className="underline" href={`/login?next=/rooms/${room.slug}`}>
                   Sign in
-                </a>{" "}
+                </Link>{" "}
                 to add things to this world.
               </>
             )}

@@ -66,9 +66,15 @@ Schema changes: add a file to `supabase/migrations/`, run `npx supabase migratio
    SUPABASE_SERVICE_ROLE_KEY=<Project Settings → API keys → secret key; never commit>
    ```
    Enable phone auth + an SMS provider when ready (brief §2.2).
-2. **Vercel**: import the GitHub repo as a new project. Set env vars:
-   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
-   `CRON_SECRET` (any random string; protects `/api/queue/tick`), `IMAGE_PROVIDER_DEFAULT=mock` until a real
-   image API key is added as `IMAGE_PROVIDER_API_KEY`.
-   `vercel.json` schedules the queue tick every minute.
+2. **Vercel / ironically.ai**: the app is served at **https://ironically.ai/collabspace** (unlisted: no links
+   from the main site, `noindex` header + meta on every page, not in any sitemap). It works like this:
+   - This repo deploys as its own Vercel project with `basePath: "/collabspace"` (see `next.config.ts`).
+   - The ironically.ai Vercel project (repo `imvibecoding/ironicallyai`) has a `vercel.json` rewrite that proxies
+     `/collabspace/*` to this project's production URL. Update that destination if the production URL changes.
+   - Env vars on the collabspace Vercel project: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+     `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET` (random string; protects the tick endpoint),
+     `IMAGE_PROVIDER_DEFAULT=mock`. Also add `https://ironically.ai/collabspace` to Supabase Auth → URL configuration
+     (site URL + redirect URLs).
+   - `vercel.json` here schedules `/collabspace/api/queue/tick` every minute.
+   - To run locally the app is at http://localhost:3000/collabspace (set `NEXT_PUBLIC_BASE_PATH=` to serve at the root).
 3. **GitHub**: protect `main` (require PRs). `gh` is installed locally; run `gh auth login` first.

@@ -16,6 +16,8 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "collabspace",
   description: "Collaborative prompt-economy platform",
+  // Unlisted for now: keep crawlers out until launch.
+  robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

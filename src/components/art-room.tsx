@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
 import type { Tables } from "@/lib/supabase/types";
 import { appealAction, downvoteAction, snapshotAction, submitPromptAction, type ActionState } from "@/app/rooms/[slug]/actions";
@@ -111,9 +112,9 @@ export function ArtRoom(props: {
             {snapState.message && (
               <span className="text-emerald-600">
                 {snapState.message.split(": ")[0]}:{" "}
-                <a className="underline" href={snapState.message.split(": ")[1]}>
+                <Link className="underline" href={snapState.message.split(": ")[1]}>
                   open
-                </a>
+                </Link>
               </span>
             )}
           </form>
@@ -194,7 +195,7 @@ export function ArtRoom(props: {
           <div className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-800">
             {props.userId ? "You are not a member of this room." : (
               <>
-                <a className="underline" href={`/login?next=/rooms/${room.slug}`}>Sign in</a> to submit prompts and vote.
+                <Link className="underline" href={`/login?next=/rooms/${room.slug}`}>Sign in</Link> to submit prompts and vote.
               </>
             )}
           </div>
