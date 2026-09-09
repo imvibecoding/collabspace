@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HeuristicPlanner, PlanError } from "./planner";
 import { applyPatch, replay } from "./patch";
 import { emptyWorld, type WorldState } from "./types";
+import { melbourneZones } from "./zones";
 
 function seeded(seed = 1) {
   let s = seed;
@@ -88,5 +89,54 @@ describe("replay", () => {
     const p2 = await planner.plan("add two dogs near the cafe", ctx(s1));
     expect(replay(s0, [p1, p2], 1).entities).toHaveLength(1);
     expect(replay(s0, [p1, p2]).entities).toHaveLength(3);
+  });
+});
+
+describe("zone-aware placement", () => {
+  const cityWorld = () => ({ ...emptyWorld("city"), zones: melbourneZones(1024) });
+
+  it("routes an explicit place name to that zone's bounds", async () => {
+    const p = await planner.plan("build a bank in toorak", ctx(cityWorld()));
+    const op = p.ops[0];
+    expect(op.op === "add" && op.entity.x).toBeDefined();
+    if (op.op === "add") {
+      const south = melbourneZones(1024).find((z) => z.id === "south")!;
+      expect(op.entity.x).toBeGreaterThanOrEqual(south.bounds.x);
+      expect(op.entity.y).toBeGreaterThanOrEqual(south.bounds.y);
+    }
+    expect(p.summary).toContain("in the South");
+  });
+
+  it("biases an unaddressed but thematically-loaded prompt to the matching zone", async () => {
+    const p = await planner.plan("park a getaway car for the heist", ctx(cityWorld()));
+    const op = p.ops[0];
+    if (op.op === "add") {
+      const west = melbourneZones(1024).find((z) => z.id === "west")!;
+      expect(op.entity.x).toBeLessThan(west.bounds.x + west.bounds.w + 40);
+    }
+    expect(p.summary).toContain("in the West");
+  });
+
+  it("does not force a location for a neutral prompt", async () => {
+    const p = await planner.plan("add a dinosaur", ctx(cityWorld()));
+    expect(p.summary).not.toContain(" in the ");
+  });
+
+  it("stamps a nonzero height on buildings and zero on flat kinds", async () => {
+    const p = await planner.plan("build a tower", ctx(emptyWorld()));
+    const op = p.ops[0];
+    expect(op.op === "add" && op.entity.height).toBeGreaterThan(0);
+    const road = await planner.plan("add a road", ctx(emptyWorld()));
+    const rop = road.ops[0];
+    expect(rop.op === "add" && rop.entity.height).toBe(0);
+  });
+
+  it("only applies implicit zone bias to new placements, not moves", async () => {
+    let state = cityWorld();
+    state = applyPatch(state, await planner.plan("build a getaway car garage", ctx(state))).state;
+    const garage = state.entities[0];
+    const p = await planner.plan(`move the ${garage.name}`, ctx(state));
+    // no destination and no vibe words in "move the X" itself → summary shouldn't claim a zone
+    expect(p.summary).not.toContain(" to the ");
   });
 });

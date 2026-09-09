@@ -6,7 +6,9 @@
  * later (same input/output contract), so rooms never change when we swap it.
  */
 import { rectsOverlap } from "./patch";
+import { DEFAULT_HEIGHT_BY_KIND } from "./types";
 import type { EntityKind, WorldEntity, WorldOp, WorldPatch, WorldState } from "./types";
+import { detectZoneByAlias, zoneForPrompt, zoneHint, type WorldZone } from "./zones";
 
 export interface PlanContext {
   state: WorldState;
@@ -91,6 +93,32 @@ function detectRegion(text: string): [number, number] | null {
   return null;
 }
 
+/**
+ * Resolve where a prompt should land. Zone place names win first ("build a
+ * bank in Toorak"), then generic direction words, then, for allowImplicit
+ * callers only (new placements, not moves), a zone whose theme matches the
+ * prompt even when no place is named, so "typical of the area" content
+ * clusters there without anyone having to ask for it explicitly.
+ */
+function resolveRegion(
+  text: string,
+  state: WorldState,
+  allowImplicit: boolean,
+): { hint: [number, number] | null; zone: WorldZone | null } {
+  const zones = state.zones ?? [];
+  if (zones.length) {
+    const explicit = detectZoneByAlias(text, zones);
+    if (explicit) return { hint: zoneHint(explicit, state.width), zone: explicit };
+  }
+  const generic = detectRegion(text);
+  if (generic) return { hint: generic, zone: null };
+  if (allowImplicit && zones.length) {
+    const implicit = zoneForPrompt(text, zones);
+    if (implicit) return { hint: zoneHint(implicit, state.width), zone: implicit };
+  }
+  return { hint: null, zone: null };
+}
+
 /** Find an existing entity referred to in the text ("the red car", "the bank"). */
 function findReferenced(text: string, state: WorldState, exclude?: string): WorldEntity | null {
   const words = text.split(" ");
@@ -165,13 +193,13 @@ export class HeuristicPlanner implements WorldPlanner {
     if (has(MOVE_VERBS)) {
       const target = findReferenced(text, state);
       if (!target) throw new PlanError("Couldn't find anything matching that to move");
-      const region = detectRegion(text);
+      const { hint: region, zone } = resolveRegion(text, state, false);
       const afterTo = text.split(/\b(?:to|near|next to|beside|by)\b/)[1] ?? "";
       const anchor = afterTo ? findReferenced(afterTo, state, target.id) : null;
       const spot = anchor ? nearSpot(anchor, target.w, target.h, state, rng) : freeSpot(state, target.w, target.h, region, rng);
       return {
         ops: [{ op: "move", id: target.id, x: spot.x, y: spot.y }],
-        summary: `moved the ${target.name}${anchor ? ` next to the ${anchor.name}` : region ? " across the map" : ""}`,
+        summary: `moved the ${target.name}${anchor ? ` next to the ${anchor.name}` : zone ? ` to the ${zone.name}` : region ? " across the map" : ""}`,
       };
     }
 
@@ -204,7 +232,7 @@ export class HeuristicPlanner implements WorldPlanner {
     if (!detected) throw new PlanError("Couldn't tell what to add. Try naming a thing: a car, a shop, three trees…");
     const count = detectCount(text, detected.word);
     const color = detectColor(text);
-    const region = detectRegion(text);
+    const { hint: region, zone } = resolveRegion(text, state, true);
     const afterNear = text.split(/\b(?:near|next to|beside|by|around|behind|in front of|outside|at)\b/)[1] ?? "";
     const anchor = afterNear ? findReferenced(afterNear, state) : null;
     const name = nameFor(text, detected.word, color);
@@ -215,6 +243,7 @@ export class HeuristicPlanner implements WorldPlanner {
       const w = Math.round(detected.size.w * jitter);
       const h = Math.round(detected.size.h * jitter);
       const spot = anchor ? nearSpot(anchor, w, h, working, rng) : freeSpot(working, w, h, region, rng);
+      const baseHeight = DEFAULT_HEIGHT_BY_KIND[detected.kind];
       const entity: WorldEntity = {
         id: newId(),
         kind: detected.kind,
@@ -224,6 +253,7 @@ export class HeuristicPlanner implements WorldPlanner {
         w,
         h,
         rotation: detected.kind === "vehicle" || detected.kind === "road" ? Math.round(rng() * 4) * 90 : 0,
+        height: baseHeight > 0 ? Math.round(baseHeight * jitter) : 0,
         color,
         spriteUrl: null,
         meta: { prompt },
@@ -231,7 +261,7 @@ export class HeuristicPlanner implements WorldPlanner {
       ops.push({ op: "add", entity });
       working = { ...working, entities: [...working.entities, entity] };
     }
-    const where = anchor ? ` near the ${anchor.name}` : region ? " " + (Object.keys(REGIONS).find((k) => new RegExp(`\\b${k}\\b`).test(text)) ?? "") : "";
+    const where = anchor ? ` near the ${anchor.name}` : zone ? ` in the ${zone.name}` : region ? " on the map" : "";
     return { ops, summary: `added ${count > 1 ? `${count} ${name}s` : `a ${name}`}${where}`.trim() };
   }
 }

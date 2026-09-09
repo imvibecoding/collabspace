@@ -6,7 +6,8 @@ import { refundSubmission } from "@/lib/credits/ledger";
 import { getBaseWorldGenerator, getSpriteGenerator } from "./generators";
 import { applyPatch } from "./patch";
 import { HeuristicPlanner, PlanError, type WorldPlanner } from "./planner";
-import { emptyWorld, type WorldPatch, type WorldState } from "./types";
+import { DEFAULT_WORLD_SIZE, emptyWorld, type WorldPatch, type WorldState } from "./types";
+import { melbourneSeedPrompts, melbourneZones } from "./zones";
 
 type Room = Tables<"rooms">;
 type Submission = Tables<"queue_submissions">;
@@ -17,8 +18,18 @@ export function setWorldPlanner(p: WorldPlanner) {
   planner = p;
 }
 
+/** Backfill fields added after some worlds were already saved (zones, entity height). */
+export function normalizeWorld(raw: WorldState | null | undefined): WorldState | null {
+  if (!raw) return null;
+  return {
+    ...raw,
+    zones: raw.zones ?? [],
+    entities: raw.entities.map((e) => ({ ...e, height: e.height ?? 0 })),
+  };
+}
+
 export function roomWorld(room: Room): WorldState | null {
-  return (room.world as unknown as WorldState | null) ?? null;
+  return normalizeWorld(room.world as unknown as WorldState | null);
 }
 
 async function history(roomId: string, actorId: string | null, action: string, targetId: string | null, payload: Json = {}) {
@@ -33,19 +44,50 @@ async function history(roomId: string, actorId: string | null, action: string, t
   });
 }
 
+/** Stamp texture identity + provenance onto a patch's new entities. Returns total generation cost. */
+async function stampNewEntities(patch: WorldPatch, world: WorldState, extraMeta: Record<string, unknown>): Promise<number> {
+  const sprites = getSpriteGenerator();
+  let costCents = 0;
+  for (const op of patch.ops) {
+    if (op.op !== "add") continue;
+    const s = await sprites.generate(op.entity, world);
+    costCents += s.providerCostCents;
+    op.entity = { ...op.entity, spriteUrl: s.spriteUrl, meta: { ...op.entity.meta, ...extraMeta } };
+  }
+  return costCents;
+}
+
 /**
  * Lazily create the base world for a world room (from the owner's world
- * prompt) the first time it's needed. Seeded rooms rely on this.
+ * prompt) the first time it's needed. Seeded rooms rely on this. City worlds
+ * (rules.city) get the Melbourne-style district layout plus a handful of
+ * starter prompts run through the same planner, so each district already has
+ * character before a real visitor submits anything.
  */
 export async function ensureWorld(room: Room): Promise<{ room: Room; world: WorldState }> {
   const existing = roomWorld(room);
   if (existing) return { room, world: existing };
   const admin = createAdminClient();
-  const rules = (room.rules ?? {}) as { world_prompt?: string };
+  const rules = (room.rules ?? {}) as { world_prompt?: string; city?: boolean };
   const prompt = rules.world_prompt?.trim() || room.name;
+  const isCity = Boolean(rules.city);
+  const zones = isCity ? melbourneZones(DEFAULT_WORLD_SIZE) : [];
   const gen = getBaseWorldGenerator();
-  const base = await gen.generate(prompt);
-  const world: WorldState = { ...emptyWorld(base.theme), backgroundUrl: base.backgroundUrl };
+  const base = await gen.generate(prompt, zones);
+  let world: WorldState = { ...emptyWorld(base.theme), backgroundUrl: base.backgroundUrl, zones };
+
+  if (isCity) {
+    for (const seed of melbourneSeedPrompts()) {
+      try {
+        const patch = await planner.plan(seed.prompt, { state: world });
+        await stampNewEntities(patch, world, { seeded: true, zoneId: seed.zoneId });
+        world = applyPatch(world, patch).state;
+      } catch {
+        // A seed prompt failing to ground shouldn't block world creation.
+      }
+    }
+  }
+
   const { data: updated } = await admin
     .from("rooms")
     .update({
@@ -58,7 +100,15 @@ export async function ensureWorld(room: Room): Promise<{ room: Room; world: Worl
     .select("*")
     .maybeSingle();
   if (updated) {
-    await history(room.id, room.owner_id, "world.created", null, { prompt, generator: gen.key, theme: base.theme, provider_cost_cents: base.providerCostCents });
+    await history(room.id, room.owner_id, "world.created", null, {
+      prompt,
+      generator: gen.key,
+      theme: base.theme,
+      provider_cost_cents: base.providerCostCents,
+      city: isCity,
+      zones: zones.map((z) => z.id),
+      seeded_entities: world.entities.length,
+    });
     return { room: updated, world };
   }
   // Someone else initialised it concurrently; reload.
@@ -85,15 +135,7 @@ export async function applyWorldSubmission(sub: Submission, roomIn: Room): Promi
     return;
   }
 
-  // Generate sprites for new entities and stamp provenance.
-  const sprites = getSpriteGenerator();
-  let costCents = 0;
-  for (const op of patch.ops) {
-    if (op.op !== "add") continue;
-    const s = await sprites.generate(op.entity, world);
-    costCents += s.providerCostCents;
-    op.entity = { ...op.entity, spriteUrl: s.spriteUrl, meta: { ...op.entity.meta, submissionId: sub.id, userId: sub.user_id } };
-  }
+  const costCents = await stampNewEntities(patch, world, { submissionId: sub.id, userId: sub.user_id });
 
   const { state, inverse } = applyPatch(world, patch);
   const appliedAt = new Date().toISOString();
@@ -179,8 +221,9 @@ export async function forkSnapshot(userId: string, snapshotId: string, name?: st
   const { data: snap } = await admin.from("snapshots").select("*, rooms!snapshots_room_id_fkey(name, rules, type)").eq("id", snapshotId).single();
   if (!snap) return { ok: false as const, message: "Snapshot not found" };
   const src = snap.rooms as { name: string; rules: Json; type: string } | null;
-  const state = snap.state as unknown as { world?: WorldState } | null;
-  if (src?.type !== "world" || !state?.world) return { ok: false as const, message: "Only world snapshots can be forked" };
+  const rawState = snap.state as unknown as { world?: WorldState } | null;
+  const world = normalizeWorld(rawState?.world);
+  if (src?.type !== "world" || !world) return { ok: false as const, message: "Only world snapshots can be forked" };
 
   const base = (name?.trim() || `${src.name} (fork)`).slice(0, 80);
   const slug = `${base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "world"}-${Math.random().toString(36).slice(2, 7)}`;
@@ -194,9 +237,9 @@ export async function forkSnapshot(userId: string, snapshotId: string, name?: st
       mode: "freeform",
       owner_id: userId,
       rules: src.rules ?? {},
-      world: state.world as unknown as Json,
-      world_initial: state.world as unknown as Json,
-      current_asset_url: state.world.backgroundUrl,
+      world: world as unknown as Json,
+      world_initial: world as unknown as Json,
+      current_asset_url: world.backgroundUrl,
       forked_from_snapshot: snap.id,
     })
     .select("*")

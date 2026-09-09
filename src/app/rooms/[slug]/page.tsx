@@ -5,7 +5,7 @@ import { ensureMonthlyGrant, getBalances } from "@/lib/credits/ledger";
 import { listImageProviders } from "@/lib/providers/image";
 import { REVERT_THRESHOLD } from "@/lib/reputation/service";
 import { windowStart } from "@/lib/queue/engine";
-import { ensureWorld, worldTimeline } from "@/lib/world/service";
+import { ensureWorld, normalizeWorld, worldTimeline } from "@/lib/world/service";
 import type { WorldState } from "@/lib/world/types";
 import { ArtRoom } from "@/components/art-room";
 import { KanbanRoom } from "@/components/kanban-room";
@@ -137,7 +137,7 @@ export default async function RoomPage({ params }: { params: Promise<{ slug: str
         <WorldRoom
           room={room}
           world={ensured.world}
-          initial={(room.world_initial as unknown as WorldState | null) ?? ensured.world}
+          initial={normalizeWorld(room.world_initial as unknown as WorldState | null) ?? ensured.world}
           timeline={timeline}
           userId={user?.id ?? null}
           canParticipate={canParticipate}

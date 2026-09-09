@@ -37,6 +37,8 @@ export async function createRoom(input: {
   visibility: Enums<"room_visibility">;
   /** World rooms: the prompt that generates the base map. */
   worldPrompt?: string;
+  /** World rooms: lay the world out as a city with Melbourne-style districts. */
+  worldCity?: boolean;
 }): Promise<Tables<"rooms">> {
   const admin = createAdminClient();
   const isArt = input.type === "art";
@@ -52,7 +54,11 @@ export async function createRoom(input: {
       // Card locking is always available in kanban rooms regardless of mode.
       mode: input.visibility === "public" ? "queue" : "freeform",
       owner_id: input.ownerId,
-      rules: isArt ? { max_prompt_words: 6 } : isWorld ? { max_prompt_words: 12, world_prompt: (input.worldPrompt ?? input.name).trim().slice(0, 200) } : {},
+      rules: isArt
+        ? { max_prompt_words: 6 }
+        : isWorld
+          ? { max_prompt_words: 12, world_prompt: (input.worldPrompt ?? input.name).trim().slice(0, 200), city: Boolean(input.worldCity) }
+          : {},
     })
     .select("*")
     .single();

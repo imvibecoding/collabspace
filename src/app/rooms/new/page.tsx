@@ -44,6 +44,17 @@ export default async function NewRoomPage({ searchParams }: { searchParams: Prom
           <input name="world_prompt" maxLength={200} placeholder="a rainy neon city by the harbour" className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700" />
           <span className="text-xs text-zinc-500">Generates the base map. Everyone else adds to it with prompts.</span>
         </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="world_city" value="1" className="mt-1" />
+          <span>
+            <span className="font-medium">Lay it out as a city (worlds only)</span>
+            <br />
+            <span className="text-xs text-zinc-500">
+              Central, North, South, East and West districts, each with its own character — prompts about a
+              district land there whether or not you say its name.
+            </span>
+          </span>
+        </label>
         <fieldset className="text-sm">
           <legend className="text-zinc-600 dark:text-zinc-400">Visibility</legend>
           <div className="mt-2 flex gap-4">

@@ -3,13 +3,21 @@
 import { useMemo, useState } from "react";
 import type { WorldEntity, WorldState } from "@/lib/world/types";
 import { entityFill } from "@/lib/world/generators";
+import { isoDepth, isoFootprintCorners, isoViewBox, pointsAttr, raise, shade, toIso } from "@/lib/world/iso";
+import { zoneCenter } from "@/lib/world/zones";
 
 export type EntityMeta = { submissionId?: string; userId?: string; prompt?: string };
 
+const BOX_KINDS = new Set(["building", "vehicle", "prop", "sign"]);
+const FLAT_KINDS = new Set(["road", "water"]);
+// Everything else (tree, character, animal, scene) renders as a billboard.
+
 /**
- * Top-down 2D world renderer. Pure presentation: background map plus
- * absolutely-positioned sprites, scaled to fit the container. Entities are
- * clickable so the room can show provenance and a downvote control.
+ * Isometric world renderer. Pure presentation: an SVG whose coordinate space
+ * is shared with the generated background (see src/lib/world/generators.ts),
+ * so entities line up with the map without any extra alignment work.
+ * Buildings/vehicles/props/signs extrude as shaded boxes; trees/characters/
+ * animals/scenes render as grounded billboards; roads/water stay flat.
  */
 export function WorldView({
   world,
@@ -25,81 +33,151 @@ export function WorldView({
   className?: string;
 }) {
   const [hover, setHover] = useState<string | null>(null);
+  const vb = useMemo(() => isoViewBox(world.width, world.height), [world.width, world.height]);
   const sorted = useMemo(
-    () => [...world.entities].sort((a, b) => zIndex(a) - zIndex(b) || a.y - b.y),
+    () => [...world.entities].sort((a, b) => isoDepth(a.x + a.w / 2, a.y + a.h / 2) - isoDepth(b.x + b.w / 2, b.y + b.h / 2)),
     [world.entities],
   );
 
   return (
     <div
-      className={`relative w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 ${className ?? ""}`}
-      style={{ aspectRatio: `${world.width} / ${world.height}` }}
-      onClick={() => onSelect?.(null)}
+      className={`relative w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 ${className ?? ""}`}
+      style={{ aspectRatio: `${vb.width} / ${vb.height}` }}
     >
-      {world.backgroundUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={world.backgroundUrl} alt="" className="absolute inset-0 h-full w-full select-none" draggable={false} />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center text-zinc-400">Generating the base world…</div>
+      {!world.backgroundUrl && (
+        <div className="absolute inset-0 flex items-center justify-center text-zinc-500">Generating the base world…</div>
       )}
-      {sorted.map((e) => {
-        const meta = e.meta as EntityMeta;
-        const selected = e.id === selectedId;
-        const highlighted = highlightSubmissionId && meta.submissionId === highlightSubmissionId;
-        const style = {
-          left: `${(e.x / world.width) * 100}%`,
-          top: `${(e.y / world.height) * 100}%`,
-          width: `${(e.w / world.width) * 100}%`,
-          height: `${(e.h / world.height) * 100}%`,
-          transform: e.rotation ? `rotate(${e.rotation}deg)` : undefined,
-          transformOrigin: "center",
-        } as const;
-        return (
-          <button
-            key={e.id}
-            type="button"
-            title={e.name}
-            aria-label={e.name}
-            style={style}
-            onMouseEnter={() => setHover(e.id)}
-            onMouseLeave={() => setHover(null)}
-            onClick={(ev) => {
-              ev.stopPropagation();
-              onSelect?.(e);
-            }}
-            className={`absolute p-0 ${selected || highlighted ? "z-20 ring-2 ring-white drop-shadow-[0_0_6px_rgba(255,255,255,0.9)]" : hover === e.id ? "z-10 brightness-110" : ""}`}
-          >
-            {e.spriteUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={e.spriteUrl} alt="" className="h-full w-full select-none" draggable={false} />
-            ) : (
-              <div className="h-full w-full rounded-sm border border-black/40" style={{ background: entityFill(e) }} />
-            )}
-          </button>
-        );
-      })}
+      <svg
+        viewBox={`${vb.minX} ${vb.minY} ${vb.width} ${vb.height}`}
+        className="absolute inset-0 h-full w-full"
+        onClick={() => onSelect?.(null)}
+      >
+        {world.backgroundUrl && <image href={world.backgroundUrl} x={vb.minX} y={vb.minY} width={vb.width} height={vb.height} preserveAspectRatio="none" />}
+
+        {world.zones.map((zone) => {
+          const c = toIso(zoneCenter(zone).x, zoneCenter(zone).y);
+          return (
+            <text
+              key={zone.id}
+              x={c.x}
+              y={c.y}
+              textAnchor="middle"
+              className="pointer-events-none select-none"
+              style={{ fontSize: world.width * 0.045, fontWeight: 700, fill: "#ffffff", opacity: 0.6, paintOrder: "stroke", stroke: "#00000066", strokeWidth: world.width * 0.006, letterSpacing: 1 }}
+            >
+              {zone.name}
+            </text>
+          );
+        })}
+
+        {sorted.map((e) => {
+          const meta = e.meta as EntityMeta;
+          const selected = e.id === selectedId;
+          const highlighted = Boolean(highlightSubmissionId && meta.submissionId === highlightSubmissionId);
+          return (
+            <EntityShape
+              key={e.id}
+              entity={e}
+              emphasized={selected || highlighted}
+              hovered={hover === e.id}
+              onHover={setHover}
+              onSelect={onSelect}
+            />
+          );
+        })}
+      </svg>
     </div>
   );
 }
 
-function zIndex(e: WorldEntity): number {
-  switch (e.kind) {
-    case "water":
-      return 0;
-    case "road":
-      return 1;
-    case "scene":
-      return 2;
-    case "building":
-      return 3;
-    case "tree":
-      return 4;
-    case "prop":
-    case "sign":
-      return 5;
-    case "vehicle":
-      return 6;
-    default:
-      return 7;
+function EntityShape({
+  entity: e,
+  emphasized,
+  hovered,
+  onHover,
+  onSelect,
+}: {
+  entity: WorldEntity;
+  emphasized: boolean;
+  hovered: boolean;
+  onHover: (id: string | null) => void;
+  onSelect?: (entity: WorldEntity | null) => void;
+}) {
+  const fill = entityFill(e);
+  const outline = emphasized ? "#ffffff" : "none";
+  const outlineWidth = emphasized ? 2.5 : 0;
+  const brighten = hovered ? 1.12 : 1;
+
+  const handlers = {
+    onMouseEnter: () => onHover(e.id),
+    onMouseLeave: () => onHover(null),
+    onClick: (ev: React.MouseEvent) => {
+      ev.stopPropagation();
+      onSelect?.(e);
+    },
+    onKeyDown: (ev: React.KeyboardEvent) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        onSelect?.(e);
+      }
+    },
+  };
+
+  if (FLAT_KINDS.has(e.kind)) {
+    const c = isoFootprintCorners(e);
+    return (
+      <g role="button" tabIndex={0} aria-label={e.name} className="cursor-pointer outline-none" {...handlers}>
+        <title>{e.name}</title>
+        <polygon
+          points={pointsAttr([c.back, c.right, c.front, c.left])}
+          fill={shade(fill, brighten)}
+          opacity={e.kind === "water" ? 0.85 : 0.95}
+          stroke={outline}
+          strokeWidth={outlineWidth}
+        />
+      </g>
+    );
   }
+
+  if (BOX_KINDS.has(e.kind)) {
+    const c = isoFootprintCorners(e);
+    const rTop = raise(c.right, e.height);
+    const rFront = raise(c.front, e.height);
+    const rLeft = raise(c.left, e.height);
+    const rBack = raise(c.back, e.height);
+    const south = [c.left, c.front, rFront, rLeft];
+    const east = [c.front, c.right, rTop, rFront];
+    const top = [rBack, rTop, rFront, rLeft];
+    return (
+      <g role="button" tabIndex={0} aria-label={e.name} className="cursor-pointer outline-none" {...handlers}>
+        <title>{e.name}</title>
+        <polygon points={pointsAttr([c.back, c.right, c.front, c.left])} fill="#000000" opacity={0.15} />
+        {e.height > 0 ? (
+          <>
+            <polygon points={pointsAttr(south)} fill={shade(fill, 0.72 * brighten)} stroke={outline} strokeWidth={outlineWidth} />
+            <polygon points={pointsAttr(east)} fill={shade(fill, 0.56 * brighten)} stroke={outline} strokeWidth={outlineWidth} />
+            <polygon points={pointsAttr(top)} fill={shade(fill, 1.0 * brighten)} stroke={outline} strokeWidth={outlineWidth} />
+          </>
+        ) : (
+          <polygon points={pointsAttr([c.back, c.right, c.front, c.left])} fill={shade(fill, brighten)} stroke={outline} strokeWidth={outlineWidth} />
+        )}
+      </g>
+    );
+  }
+
+  // Billboard: a grounded shadow plus a raised circle/trunk for tree, character, animal, scene.
+  const cx = e.x + e.w / 2;
+  const cy = e.y + e.h / 2;
+  const base = toIso(cx, cy);
+  const radius = Math.max(4, Math.min(e.w, e.h) / 2);
+  const top = raise(base, e.height + radius * (e.kind === "tree" ? 1 : 0.6));
+  return (
+    <g role="button" tabIndex={0} aria-label={e.name} className="cursor-pointer outline-none" {...handlers}>
+      <title>{e.name}</title>
+      <ellipse cx={base.x} cy={base.y} rx={radius * 0.9} ry={radius * 0.35} fill="#000000" opacity={0.25} />
+      {e.height > 0 && <line x1={base.x} y1={base.y} x2={top.x} y2={top.y} stroke={shade(fill, 0.5)} strokeWidth={Math.max(2, radius * 0.18)} />}
+      <circle cx={top.x} cy={top.y} r={radius} fill={shade(fill, brighten)} stroke={outline} strokeWidth={outlineWidth} />
+      {e.kind === "tree" && <circle cx={top.x - radius * 0.3} cy={top.y - radius * 0.3} r={radius * 0.4} fill={shade(fill, 1.3)} opacity={0.6} />}
+    </g>
+  );
 }

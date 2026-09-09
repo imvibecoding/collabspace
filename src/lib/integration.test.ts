@@ -102,7 +102,9 @@ describe.skipIf(!up)("local stack integration", () => {
 
     const room = await mod.createRoom({ ownerId: a.id, name: `it-${run}`, type: "art", visibility: "public" });
     roomId = room.id;
-    await mod.admin.from("rooms").update({ base_window_seconds: 1, premium_window_seconds: 1 }).eq("id", roomId);
+    // Window is short so the test doesn't wait long for resolution, but long enough that the
+    // handful of submit() calls below can't accidentally roll over into the next window.
+    await mod.admin.from("rooms").update({ base_window_seconds: 3, premium_window_seconds: 3 }).eq("id", roomId);
 
     // Submissions in one window: A base, B premium 5, C premium 7.
     const sa = await mod.submit({ userId: a.id, roomId, prompt: "calm lake", lane: "base" });
@@ -114,7 +116,7 @@ describe.skipIf(!up)("local stack integration", () => {
     const banned = await mod.submit({ userId: d.id, roomId, prompt: "gore fest", lane: "base" });
     expect(banned).toMatchObject({ ok: false, code: "moderation" });
 
-    await sleep(1300);
+    await sleep(3300);
     const totals = await mod.resolveDueWindows(roomId);
     expect(totals).toEqual({ applied: 2, refunded: 1 });
 

@@ -1,3 +1,5 @@
+import type { WorldZone } from "./zones";
+
 /**
  * World rooms: a shared top-down 2D world (old-GTA style) that people grow
  * through prompts. The world is *data*, not an image: a base map plus a list
@@ -32,11 +34,27 @@ export interface WorldEntity {
   w: number;
   h: number;
   rotation: number;
+  /** Visual elevation in the isometric renderer (screen px at full zoom). 0 = flat (roads, water). */
+  height: number;
   color: string | null;
   spriteUrl: string | null;
   /** Provenance: which submission created it, free-form extras. */
   meta: Record<string, unknown>;
 }
+
+/** Default isometric extrusion height per kind; the planner jitters around this. */
+export const DEFAULT_HEIGHT_BY_KIND: Record<EntityKind, number> = {
+  building: 72,
+  road: 0,
+  tree: 30,
+  water: 0,
+  vehicle: 16,
+  character: 20,
+  animal: 15,
+  prop: 18,
+  sign: 24,
+  scene: 26,
+};
 
 export interface WorldState {
   width: number;
@@ -44,6 +62,8 @@ export interface WorldState {
   theme: string;
   backgroundUrl: string | null;
   entities: WorldEntity[];
+  /** City districts (empty for non-city themes). See src/lib/world/zones.ts. */
+  zones: WorldZone[];
 }
 
 export type WorldOp =
@@ -61,5 +81,5 @@ export interface WorldPatch {
 export const DEFAULT_WORLD_SIZE = 1024;
 
 export function emptyWorld(theme = "city"): WorldState {
-  return { width: DEFAULT_WORLD_SIZE, height: DEFAULT_WORLD_SIZE, theme, backgroundUrl: null, entities: [] };
+  return { width: DEFAULT_WORLD_SIZE, height: DEFAULT_WORLD_SIZE, theme, backgroundUrl: null, entities: [], zones: [] };
 }
