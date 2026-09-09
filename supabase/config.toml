@@ -411,3 +411,27 @@ enabled = true
 # declarative_schema_path = "./schemas"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# ---------------------------------------------------------------------------
+# Hosted project overrides (applied with `supabase config push` after `supabase link`).
+# ---------------------------------------------------------------------------
+[remotes.production]
+project_id = "aqszydhbnfvvnfeupnmk"
+
+[remotes.production.auth]
+site_url = "https://ironically.ai/collabspace"
+additional_redirect_urls = [
+  "https://ironically.ai/collabspace/**",
+  "https://collabspace-psi-two.vercel.app/collabspace/**",
+  "http://localhost:3000/collabspace/**",
+]
+
+[remotes.production.auth.email]
+enable_confirmations = true
+# Keep hosted defaults for these (local dev relaxes them).
+max_frequency = "1m0s"
+otp_length = 8
+
+[remotes.production.auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
