@@ -176,7 +176,7 @@ export async function worldTimeline(roomId: string, limit = 300) {
  */
 export async function forkSnapshot(userId: string, snapshotId: string, name?: string) {
   const admin = createAdminClient();
-  const { data: snap } = await admin.from("snapshots").select("*, rooms(name, rules, type)").eq("id", snapshotId).single();
+  const { data: snap } = await admin.from("snapshots").select("*, rooms!snapshots_room_id_fkey(name, rules, type)").eq("id", snapshotId).single();
   if (!snap) return { ok: false as const, message: "Snapshot not found" };
   const src = snap.rooms as { name: string; rules: Json; type: string } | null;
   const state = snap.state as unknown as { world?: WorldState } | null;

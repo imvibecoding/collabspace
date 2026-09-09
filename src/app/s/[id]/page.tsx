@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function SnapshotPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: snap } = await supabase.from("snapshots").select("*, rooms(name, slug, type)").eq("id", id).maybeSingle();
+  const { data: snap } = await supabase.from("snapshots").select("*, rooms!snapshots_room_id_fkey(name, slug, type)").eq("id", id).maybeSingle();
   if (!snap) notFound();
   const state = (snap.state ?? {}) as { paid?: boolean; world?: WorldState };
   const room = snap.rooms as { name: string; slug: string; type: string } | null;
