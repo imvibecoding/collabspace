@@ -190,4 +190,48 @@ describe.skipIf(!up)("local stack integration", () => {
       await mod.admin.from("rooms").delete().eq("id", priv.id);
     }
   }, 30_000);
+it("world rooms: freeform private applies instantly; public revert undoes the patch and appeal restores it", async () => {
+    const owner = await mkUser("w");
+    await mod.grant({ userId: owner.id, kind: "image", amount: 50, reason: "test" });
+    const priv = await mod.createRoom({ ownerId: owner.id, name: `w-${run}`, type: "world", visibility: "private", worldPrompt: "a neon city" });
+    try {
+      expect(priv.world).toBeTruthy();
+      const r = await mod.submit({ userId: owner.id, roomId: priv.id, prompt: "open a cafe downtown", lane: "base" });
+      expect(r).toMatchObject({ ok: true, applied: true });
+      const { data: room } = await mod.admin.from("rooms").select("world").eq("id", priv.id).single();
+      const world = room?.world as unknown as { entities: Array<{ name: string; kind: string }> };
+      expect(world.entities).toHaveLength(1);
+      expect(world.entities[0]).toMatchObject({ kind: "building", name: "cafe" });
+      expect((await mod.getBalances(owner.id)).image.paid).toBe(49);
+      const bad = await mod.submit({ userId: owner.id, roomId: priv.id, prompt: "vibes only", lane: "base" });
+      expect(bad).toMatchObject({ ok: true, applied: true }); // accepted at submit time…
+      const { data: rejected } = await mod.admin.from("queue_submissions").select("status").eq("id", (bad as { submissionId: string }).submissionId).single();
+      expect(rejected?.status).toBe("rejected"); // …but the planner rejects it and refunds
+      expect((await mod.getBalances(owner.id)).image.paid).toBe(49);
+    } finally {
+      await mod.admin.from("rooms").delete().eq("id", priv.id);
+    }
+
+    // Public world: downvotes revert the patch, appeal restores it.
+    const pub = await mod.createRoom({ ownerId: owner.id, name: `pw-${run}`, type: "world", visibility: "public", worldPrompt: "desert town" });
+    try {
+      const s1 = await mod.submit({ userId: owner.id, roomId: pub.id, prompt: "spawn three zombies", lane: "instant" });
+      expect(s1).toMatchObject({ ok: true, applied: true });
+      const sid = (s1 as { submissionId: string }).submissionId;
+      const count = async () => ((await mod.admin.from("rooms").select("world").eq("id", pub.id).single()).data?.world as unknown as { entities: unknown[] }).entities.length;
+      expect(await count()).toBe(3);
+      const v1 = await mkUser("v1", { score: 0.3 });
+      const v2 = await mkUser("v2", { score: 0.3 });
+      const v3 = await mkUser("v3", { score: 0.3 });
+      await mod.admin.from("reputation_scores").update({ score: 1.0 }).in("user_id", [v1.id, v2.id, v3.id]);
+      for (const u of [v1, v2, v3]) await mod.downvote(u.id, sid);
+      expect(await count()).toBe(0);
+      await mod.admin.from("moderation_flags").update({ weight: 0.3 }).eq("submission_id", sid);
+      const ap = await mod.appeal(owner.id, sid);
+      expect(ap.ok && ap.verdict.brigading).toBe(true);
+      expect(await count()).toBe(3);
+    } finally {
+      await mod.admin.from("rooms").delete().eq("id", pub.id);
+    }
+  }, 30_000);
 });
