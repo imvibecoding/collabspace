@@ -7,7 +7,7 @@ import { getBaseWorldGenerator, getSpriteGenerator } from "./generators";
 import { applyPatch } from "./patch";
 import { HeuristicPlanner, PlanError, type WorldPlanner } from "./planner";
 import { DEFAULT_WORLD_SIZE, emptyWorld, type WorldPatch, type WorldState } from "./types";
-import { melbourneSeedPrompts, melbourneZones } from "./zones";
+import { melbourneGeoZones, melbourneSeedPrompts } from "./zones";
 
 type Room = Tables<"rooms">;
 type Submission = Tables<"queue_submissions">;
@@ -71,10 +71,19 @@ export async function ensureWorld(room: Room): Promise<{ room: Room; world: Worl
   const rules = (room.rules ?? {}) as { world_prompt?: string; city?: boolean };
   const prompt = rules.world_prompt?.trim() || room.name;
   const isCity = Boolean(rules.city);
-  const zones = isCity ? melbourneZones(DEFAULT_WORLD_SIZE) : [];
+  // City worlds sit on the real Melbourne outline from OpenStreetMap, with the
+  // districts aligned to where those places actually are.
+  const baseMapId = isCity ? "melbourne" : undefined;
+  const zones = isCity ? melbourneGeoZones(DEFAULT_WORLD_SIZE) : [];
   const gen = getBaseWorldGenerator();
   const base = await gen.generate(prompt, zones);
-  let world: WorldState = { ...emptyWorld(base.theme), backgroundUrl: base.backgroundUrl, zones, citySeed: isCity ? room.id : undefined };
+  let world: WorldState = {
+    ...emptyWorld(base.theme),
+    backgroundUrl: base.backgroundUrl,
+    zones,
+    citySeed: isCity ? room.id : undefined,
+    baseMapId,
+  };
 
   if (isCity) {
     for (const seed of melbourneSeedPrompts()) {

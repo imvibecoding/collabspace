@@ -10,6 +10,7 @@ import { useRoomRealtime } from "./use-room-realtime";
 import { HistoryList, type HistoryRow } from "./history-list";
 import type { EntityMeta, ViewMode } from "./world-3d";
 import { World3DClient } from "./world-3d-client";
+import { ZONE_THEME_COST_CREDITS } from "@/lib/world/pricing";
 
 type Lane = "base" | "premium" | "instant";
 
@@ -294,7 +295,9 @@ export function WorldRoom(props: {
               </label>
             )}
             <p className="text-xs text-zinc-500">
-              Add, move, recolour or remove things: “three pine trees top left”, “move the taxi next to the cafe”, “paint the bank gold”, “demolish the warehouse”.
+              Add, move, recolour or remove things: “park a police car in Footscray”, “three pine trees in
+              Fitzroy”, “move the taxi next to the cafe”, “demolish the warehouse”. Restyling a whole area —
+              “make the west look like an industrial port” — costs {ZONE_THEME_COST_CREDITS} credits.
             </p>
             <button disabled={submitting} className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black">
               {submitting ? "Submitting…" : `Submit for ${cost} credit${cost === 1 ? "" : "s"}`}

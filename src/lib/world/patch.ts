@@ -6,6 +6,7 @@ import type { WorldEntity, WorldOp, WorldPatch, WorldState } from "./types";
  */
 export function applyPatch(state: WorldState, patch: WorldPatch): { state: WorldState; inverse: WorldPatch } {
   const entities = [...state.entities];
+  const zones = [...(state.zones ?? [])];
   const inverseOps: WorldOp[] = [];
 
   for (const op of patch.ops) {
@@ -31,6 +32,13 @@ export function applyPatch(state: WorldState, patch: WorldPatch): { state: World
         entities[idx] = { ...e, x: op.x, y: op.y, rotation: op.rotation ?? e.rotation };
         break;
       }
+      case "zone": {
+        const idx = zones.findIndex((z) => z.id === op.zoneId);
+        if (idx === -1) break;
+        inverseOps.unshift({ op: "zone", zoneId: op.zoneId, style: zones[idx].style ?? null });
+        zones[idx] = { ...zones[idx], style: op.style ?? undefined };
+        break;
+      }
       case "modify": {
         const idx = entities.findIndex((e) => e.id === op.id);
         if (idx === -1) break;
@@ -47,7 +55,7 @@ export function applyPatch(state: WorldState, patch: WorldPatch): { state: World
   }
 
   return {
-    state: { ...state, entities },
+    state: { ...state, entities, zones },
     inverse: { ops: inverseOps, summary: `undo: ${patch.summary}` },
   };
 }

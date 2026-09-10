@@ -16,6 +16,22 @@ export type FilterResult =
   | { allowed: true; normalized: string }
   | { allowed: false; reason: string; code: "empty" | "too_long" | "blocklist" | "classifier" };
 
+/**
+ * Prompts that pin violence onto a real ethnic, national or religious group
+ * ("an <group> with a machete") are the main way a public, real-city world gets
+ * used for racial caricature. They're held for review rather than hard-blocked,
+ * since the same words are fine in other combinations.
+ */
+const GROUP_WORDS =
+  "african|asian|arab|indian|chinese|jewish|muslim|islamic|aboriginal|indigenous|black|white|mexican|somali|sudanese|lebanese|greek|italian|vietnamese|romani|gypsy";
+const VIOLENCE_WORDS =
+  "machete|knife|gun|rifle|gang|thug|criminal|rob|robbing|robber|stab|shoot|shooting|attack|riot|invade|terrorist|bomb";
+
+export function targetsGroupWithViolence(text: string): boolean {
+  const t = text.toLowerCase();
+  return new RegExp(`\\b(${GROUP_WORDS})\\b`).test(t) && new RegExp(`\\b(${VIOLENCE_WORDS})\\b`).test(t);
+}
+
 /** Cheap first line of defence. Keep short; the classifier does the heavy lifting. */
 export const GLOBAL_BLOCKLIST: string[] = [
   "nsfw",
@@ -76,6 +92,14 @@ export function filterPromptSync(prompt: string, rules: RoomRules = {}): FilterR
 
   const hit = matchesBlocklist(normalized, [...GLOBAL_BLOCKLIST, ...(rules.blocklist ?? [])]);
   if (hit) return { allowed: false, code: "blocklist", reason: "Prompt contains a blocked term" };
+
+  if (targetsGroupWithViolence(normalized)) {
+    return {
+      allowed: false,
+      code: "blocklist",
+      reason: "This reads as pinning violence on a real group of people. Describe the character without that.",
+    };
+  }
 
   return { allowed: true, normalized };
 }

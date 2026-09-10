@@ -8,8 +8,9 @@
 import { rectsOverlap } from "./patch";
 import { DEFAULT_HEIGHT_BY_KIND } from "./types";
 import type { EntityKind, WorldEntity, WorldOp, WorldPatch, WorldState } from "./types";
-import { detectZoneByAlias, zoneForPrompt, zoneHint, type WorldZone } from "./zones";
+import { detectZoneByAlias, deriveZoneStyle, zoneForPrompt, zoneHint, type WorldZone } from "./zones";
 import { cityObstacles, generateCity, nearestFreeLot, snapToRoad, type CityLayout, type Rect } from "./city";
+import { BASEMAP_ENTITY_SIZE, getBaseMap, inGreen, landmarkRects, nearestRoad, rectInWater, type BaseMap } from "./basemap";
 
 export interface PlanContext {
   state: WorldState;
@@ -120,6 +121,25 @@ function resolveRegion(
   return { hint: null, zone: null };
 }
 
+/**
+ * "make the west look like a rainy port" / "turn Footscray into a slum" —
+ * a whole-district restyle rather than a single object. Exported so pricing can
+ * spot one before the planner runs.
+ */
+export function detectZoneTheme(prompt: string, zones: WorldZone[]): { zone: WorldZone; description: string } | null {
+  if (!zones.length) return null;
+  const text = norm(prompt);
+  const m =
+    /\b(?:make|turn|render|restyle|redo|convert)\b\s+(.+?)\s+(?:look\s+like|look|into|to look like|like|as)\s+(.+)$/.exec(text) ??
+    /\b(?:make|turn)\b\s+(.+?)\s+(more\s+.+)$/.exec(text);
+  if (!m) return null;
+  const zone = detectZoneByAlias(m[1], zones);
+  if (!zone) return null;
+  const description = m[2].replace(/^(a|an|the)\s+/, "").trim();
+  if (!description) return null;
+  return { zone, description };
+}
+
 /** Find an existing entity referred to in the text ("the red car", "the bank"). */
 function findReferenced(text: string, state: WorldState, exclude?: string): WorldEntity | null {
   const words = text.split(" ");
@@ -148,26 +168,48 @@ function nameFor(text: string, kindWord: string, color: string | null): string {
   return words.join(" ");
 }
 
-function freeSpot(state: WorldState, w: number, h: number, hint: [number, number] | null, rng: () => number, obstacles: Rect[] = []): { x: number; y: number } {
+function freeSpot(
+  state: WorldState,
+  w: number,
+  h: number,
+  hint: [number, number] | null,
+  rng: () => number,
+  obstacles: Rect[] = [],
+  opts: { bm?: BaseMap | null; allowWater?: boolean; avoidGreen?: boolean } = {},
+): { x: number; y: number } {
   const W = state.width;
   const H = state.height;
-  for (let attempt = 0; attempt < 90; attempt++) {
+  const bm = opts.bm ?? null;
+  let fallback: { x: number; y: number } | null = null;
+  for (let attempt = 0; attempt < 120; attempt++) {
     const spread = hint ? 0.12 + attempt * 0.01 : 1;
     const cx = hint ? hint[0] * W + (rng() - 0.5) * spread * W : rng() * W;
     const cy = hint ? hint[1] * H + (rng() - 0.5) * spread * H : rng() * H;
     const x = Math.round(Math.min(W - w, Math.max(0, cx - w / 2)));
     const y = Math.round(Math.min(H - h, Math.max(0, cy - h / 2)));
     const rect = { x, y, w, h };
+    // Anything on dry land is a valid last resort, even if it's crowded.
+    if (!fallback && (!bm || opts.allowWater || !rectInWater(bm, rect))) fallback = { x, y };
     if (state.entities.some((e) => e.kind !== "road" && e.kind !== "water" && rectsOverlap(e, rect))) continue;
     if (obstacles.some((o) => rectsOverlap(o, rect, 2))) continue;
+    if (bm && !opts.allowWater && rectInWater(bm, rect)) continue;
+    if (bm && opts.avoidGreen && inGreen(bm, x + w / 2, y + h / 2)) continue;
     return { x, y };
   }
-  return { x: Math.round(rng() * (W - w)), y: Math.round(rng() * (H - h)) };
+  return fallback ?? { x: Math.round(rng() * (W - w)), y: Math.round(rng() * (H - h)) };
 }
 
-function nearSpot(anchor: WorldEntity, w: number, h: number, state: WorldState, rng: () => number, obstacles: Rect[] = []) {
+function nearSpot(
+  anchor: WorldEntity,
+  w: number,
+  h: number,
+  state: WorldState,
+  rng: () => number,
+  obstacles: Rect[] = [],
+  opts: { bm?: BaseMap | null; allowWater?: boolean; avoidGreen?: boolean } = {},
+) {
   const hint: [number, number] = [(anchor.x + anchor.w / 2) / state.width, (anchor.y + anchor.h / 2) / state.height];
-  return freeSpot(state, w, h, hint, rng, obstacles);
+  return freeSpot(state, w, h, hint, rng, obstacles, opts);
 }
 
 /** City worlds carry a procedural layout; new things must fit around it (or claim a lot / a road). */
@@ -188,6 +230,16 @@ export class HeuristicPlanner implements WorldPlanner {
     const state = ctx.state;
     const has = (verbs: string[]) => verbs.some((v) => new RegExp(`\\b${v}\\b`).test(text));
 
+    // --- theme a whole district ---
+    const theme = detectZoneTheme(prompt, state.zones ?? []);
+    if (theme) {
+      const style = deriveZoneStyle(theme.description);
+      return {
+        ops: [{ op: "zone", zoneId: theme.zone.id, style }],
+        summary: `restyled the ${theme.zone.name} as ${style.label}`,
+      };
+    }
+
     // --- remove ---
     if (has(REMOVE_VERBS)) {
       const target = findReferenced(text, state);
@@ -207,9 +259,14 @@ export class HeuristicPlanner implements WorldPlanner {
       const { hint: region, zone } = resolveRegion(text, state, false);
       const afterTo = text.split(/\b(?:to|near|next to|beside|by)\b/)[1] ?? "";
       const anchor = afterTo ? findReferenced(afterTo, state, target.id) : null;
-      const cityM = cityContext(state);
-      const obstaclesM = cityM && target.kind !== "road" && target.kind !== "water" ? cityObstacles(cityM.layout, cityM.taken) : [];
-      const spot = anchor ? nearSpot(anchor, target.w, target.h, state, rng, obstaclesM) : freeSpot(state, target.w, target.h, region, rng, obstaclesM);
+      const bmM = getBaseMap(state.baseMapId);
+      const cityM = bmM ? null : cityContext(state);
+      const solidM = target.kind !== "road" && target.kind !== "water";
+      const obstaclesM = cityM && solidM ? cityObstacles(cityM.layout, cityM.taken) : solidM && bmM ? landmarkRects(bmM) : [];
+      const optsM = { bm: bmM, allowWater: !solidM };
+      const spot = anchor
+        ? nearSpot(anchor, target.w, target.h, state, rng, obstaclesM, optsM)
+        : freeSpot(state, target.w, target.h, region, rng, obstaclesM, optsM);
       return {
         ops: [{ op: "move", id: target.id, x: spot.x, y: spot.y }],
         summary: `moved the ${target.name}${anchor ? ` next to the ${anchor.name}` : zone ? ` to the ${zone.name}` : region ? " across the map" : ""}`,
@@ -251,13 +308,23 @@ export class HeuristicPlanner implements WorldPlanner {
     const name = nameFor(text, detected.word, color);
     const ops: WorldOp[] = [];
     let working = state;
-    const city = cityContext(state);
+    const bm = getBaseMap(state.baseMapId);
+    // With a real base map the world is an outline plus landmarks; there is no
+    // procedural lot grid to claim, so we place on open land instead.
+    const city = bm ? null : cityContext(state);
+    const bmObstacles = bm ? landmarkRects(bm) : [];
     for (let i = 0; i < count; i++) {
       const jitter = 0.85 + rng() * 0.3;
-      let w = Math.round(detected.size.w * jitter);
-      let h = Math.round(detected.size.h * jitter);
-      const baseHeight = DEFAULT_HEIGHT_BY_KIND[detected.kind];
-      let height = baseHeight > 0 ? Math.round(baseHeight * jitter) : 0;
+      // On a real base map, sizes come from the map's own scale rather than the
+      // abstract grid the procedural city uses.
+      const scaled = bm ? BASEMAP_ENTITY_SIZE[detected.kind] : null;
+      const round1 = (v: number) => Math.round(v * 10) / 10;
+      let w = scaled ? round1(scaled.w * jitter) : Math.round(detected.size.w * jitter);
+      let h = scaled ? round1(scaled.h * jitter) : Math.round(detected.size.h * jitter);
+      const baseHeight = scaled ? scaled.height : DEFAULT_HEIGHT_BY_KIND[detected.kind];
+      let height = baseHeight > 0 ? (scaled ? round1(baseHeight * jitter) : Math.round(baseHeight * jitter)) : 0;
+      // "tower"/"skyscraper" should actually tower.
+      if (scaled && detected.kind === "building" && /\b(tower|skyscraper|highrise|high rise)\b/.test(text)) height = round1(height * 3.2);
       let rotation = detected.kind === "vehicle" || detected.kind === "road" ? Math.round(rng() * 4) * 90 : 0;
       const meta: Record<string, unknown> = { prompt };
       let spot: { x: number; y: number } | null = null;
@@ -280,13 +347,28 @@ export class HeuristicPlanner implements WorldPlanner {
         }
       }
       if (!spot) {
-        const obstacles = city && detected.kind !== "road" && detected.kind !== "water" ? cityObstacles(city.layout, city.taken) : [];
-        spot = anchor ? nearSpot(anchor, w, h, working, rng, obstacles) : freeSpot(working, w, h, region, rng, obstacles);
+        const solid = detected.kind !== "road" && detected.kind !== "water";
+        const obstacles = city && solid ? cityObstacles(city.layout, city.taken) : solid ? bmObstacles : [];
+        const opts = { bm, allowWater: !solid, avoidGreen: detected.kind === "building" };
+        spot = anchor
+          ? nearSpot(anchor, w, h, working, rng, obstacles, opts)
+          : freeSpot(working, w, h, region, rng, obstacles, opts);
         if (city && detected.kind === "vehicle") {
           const snapped = snapToRoad(city.layout, spot.x + w / 2, spot.y + h / 2);
           spot = { x: Math.round(snapped.x - w / 2), y: Math.round(snapped.y - h / 2) };
           rotation = snapped.axis === "v" ? 90 : 0;
+        } else if (bm && detected.kind === "vehicle") {
+          // Put traffic on a real street, pointing the way the street runs.
+          const snapped = nearestRoad(bm, spot.x + w / 2, spot.y + h / 2);
+          if (snapped) {
+            spot = { x: Math.round(snapped.x - w / 2), y: Math.round(snapped.y - h / 2) };
+            rotation = Math.round(snapped.angle);
+          }
         }
+      }
+      if (bm && zone?.style) {
+        // Things added to a themed district take on that district's look.
+        height = Math.max(1, Math.round(height * zone.style.heightScale));
       }
 
       const entity: WorldEntity = {

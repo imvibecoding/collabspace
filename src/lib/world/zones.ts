@@ -21,6 +21,8 @@ export interface WorldZone {
   aliases: string[];
   /** Thematic words that bias an unaddressed prompt toward this zone. */
   vibe: string[];
+  /** Applied by a "make the west look like…" prompt. See ZoneStyle below. */
+  style?: ZoneStyle;
 }
 
 export function zoneCenter(zone: WorldZone) {
@@ -130,4 +132,108 @@ export function melbourneSeedPrompts(): Array<{ zoneId: string; prompt: string }
     { zoneId: "east", prompt: "plant a leafy garden with an oak tree in hawthorn" },
     { zoneId: "east", prompt: "build a heritage brick house in camberwell" },
   ];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Area theming                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A look applied to a whole district by a prompt ("make the west look like a
+ * rainy industrial port"). Themes are a palette + a few knobs, not new geometry,
+ * so they apply instantly and revert cleanly like any other patch.
+ */
+export interface ZoneStyle {
+  /** What was asked for, shown in history and on the area chip. */
+  label: string;
+  /** Ground tint for the district. */
+  ground: string;
+  /** Facade palette for buildings placed here. */
+  palette: string[];
+  /** Multiplier on the height of buildings added here. */
+  heightScale: number;
+  /** 0..1 scatter of small clutter. */
+  density: number;
+  /** 0..1 likelihood of neon signage at night. */
+  neon: number;
+}
+
+const THEMES: Array<{ words: string[]; style: Omit<ZoneStyle, "label"> }> = [
+  {
+    words: ["slum", "shanty", "favela", "shack", "tin", "corrugated", "informal settlement"],
+    style: { ground: "#8a7350", palette: ["#a8703f", "#8d6a4a", "#b5895c", "#7d6b52", "#9c5f3c"], heightScale: 0.35, density: 0.95, neon: 0.05 },
+  },
+  {
+    words: ["neon", "cyberpunk", "cyber", "blade runner", "synthwave", "futuristic"],
+    style: { ground: "#1e2030", palette: ["#2b3350", "#3a2f55", "#22304a", "#402a4d"], heightScale: 1.6, density: 0.7, neon: 0.9 },
+  },
+  {
+    words: ["beach", "tropical", "island", "resort", "palm", "seaside"],
+    style: { ground: "#d9c896", palette: ["#f0e7d4", "#e8dcc2", "#cfd8c2", "#f5efe2"], heightScale: 0.6, density: 0.4, neon: 0.1 },
+  },
+  {
+    words: ["desert", "dune", "sand", "outback", "arid"],
+    style: { ground: "#d5b678", palette: ["#d8c9a3", "#c2ab7f", "#e0d2ae", "#b59a6e"], heightScale: 0.5, density: 0.3, neon: 0.05 },
+  },
+  {
+    words: ["snow", "arctic", "ice", "frozen", "winter", "alpine"],
+    style: { ground: "#e4ecf2", palette: ["#cfd8e0", "#dde5ec", "#b9c4cf", "#eef3f7"], heightScale: 0.7, density: 0.3, neon: 0.1 },
+  },
+  {
+    words: ["forest", "jungle", "woods", "overgrown", "rainforest", "park"],
+    style: { ground: "#4d7a3c", palette: ["#6b5a3f", "#7d6b4a", "#59683f", "#8a7550"], heightScale: 0.5, density: 0.8, neon: 0.02 },
+  },
+  {
+    words: ["industrial", "factory", "port", "docks", "warehouse", "freight", "refinery"],
+    style: { ground: "#5c5a54", palette: ["#7a776f", "#8c8a82", "#6f6c64", "#9a978c"], heightScale: 0.8, density: 0.6, neon: 0.15 },
+  },
+  {
+    words: ["luxury", "wealthy", "rich", "mansion", "posh", "opulent", "gold"],
+    style: { ground: "#6f8f72", palette: ["#f0ece2", "#e9e4d8", "#dad3c2", "#d4c39a"], heightScale: 1.1, density: 0.3, neon: 0.1 },
+  },
+  {
+    words: ["ruin", "ruins", "apocalypse", "abandoned", "derelict", "wasteland", "bombed"],
+    style: { ground: "#6b6455", palette: ["#6e675c", "#807868", "#5c564c", "#8a7f6d"], heightScale: 0.55, density: 0.9, neon: 0.02 },
+  },
+  {
+    words: ["medieval", "castle", "old town", "cobble", "fantasy"],
+    style: { ground: "#7e7256", palette: ["#9a8a6d", "#87795f", "#b0a184", "#75694f"], heightScale: 0.7, density: 0.6, neon: 0.0 },
+  },
+];
+
+const DEFAULT_STYLE: Omit<ZoneStyle, "label"> = {
+  ground: "#8a8a8a",
+  palette: ["#b9b4a6", "#a8a39a", "#c6c1b4", "#97928a"],
+  heightScale: 1,
+  density: 0.5,
+  neon: 0.2,
+};
+
+/** Turn a free-text description of a look into a district style. */
+export function deriveZoneStyle(description: string): ZoneStyle {
+  const text = description.toLowerCase();
+  const hit = THEMES.find((t) => t.words.some((w) => text.includes(w)));
+  return { label: description.trim().slice(0, 60), ...(hit?.style ?? DEFAULT_STYLE) };
+}
+
+/**
+ * Districts aligned to the real Melbourne base map: the CBD sits where the CBD
+ * actually is, with the quarters around it. (`melbourneZones` keeps the plain
+ * banded layout for worlds without a real base map.)
+ */
+export function melbourneGeoZones(size: number): WorldZone[] {
+  const generic = melbourneZones(size);
+  const byId = Object.fromEntries(generic.map((z) => [z.id, z]));
+  const cx0 = Math.round(size * 0.46);
+  const cx1 = Math.round(size * 0.6);
+  const cy0 = Math.round(size * 0.35);
+  const cy1 = Math.round(size * 0.465);
+  const bounds: Record<string, WorldZone["bounds"]> = {
+    north: { x: 0, y: 0, w: size, h: cy0 },
+    south: { x: 0, y: cy1, w: size, h: size - cy1 },
+    west: { x: 0, y: cy0, w: cx0, h: cy1 - cy0 },
+    east: { x: cx1, y: cy0, w: size - cx1, h: cy1 - cy0 },
+    central: { x: cx0, y: cy0, w: cx1 - cx0, h: cy1 - cy0 },
+  };
+  return generic.map((z) => ({ ...byId[z.id], bounds: bounds[z.id] }));
 }

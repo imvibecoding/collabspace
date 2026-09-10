@@ -7,6 +7,7 @@ import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { generateCity, type CityLayout } from "@/lib/world/city";
+import { getBaseMap, heightUnits, type BaseMap } from "@/lib/world/basemap";
 import { entityFill } from "@/lib/world/generators";
 import { dateAtLocalHour, daylightAt, palette, type Daylight } from "@/lib/world/sun";
 import type { WorldEntity, WorldState } from "@/lib/world/types";
@@ -132,6 +133,299 @@ function makeGroundTexture(world: WorldState, city: CityLayout) {
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   return t;
+}
+
+/** Ground for a real base map: land, districts, parks, water, then roads on top. */
+function makeBaseGroundTexture(world: WorldState, bm: BaseMap) {
+  const px = 2048;
+  const k = px / world.width;
+  const c = document.createElement("canvas");
+  c.width = c.height = px;
+  const g = c.getContext("2d")!;
+
+  g.fillStyle = "#8d9282";
+  g.fillRect(0, 0, px, px);
+
+  for (const z of world.zones ?? []) {
+    g.globalAlpha = z.style ? 0.5 : 0.25;
+    g.fillStyle = z.style?.ground ?? z.color;
+    g.fillRect(z.bounds.x * k, z.bounds.y * k, z.bounds.w * k, z.bounds.h * k);
+  }
+  g.globalAlpha = 1;
+
+  const trace = (flat: number[]) => {
+    g.beginPath();
+    for (let i = 0; i < flat.length; i += 2) {
+      const x = flat[i] * k;
+      const y = flat[i + 1] * k;
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+  };
+
+  g.fillStyle = "#5d8a49";
+  for (const p of bm.green) {
+    trace(p);
+    g.closePath();
+    g.fill();
+  }
+
+  g.fillStyle = "#2f6a99";
+  if (bm.sea.length) {
+    trace(bm.sea);
+    g.closePath();
+    g.fill();
+  }
+  for (const p of bm.water) {
+    trace(p);
+    g.closePath();
+    g.fill();
+  }
+
+  g.lineCap = "round";
+  g.lineJoin = "round";
+  for (const pass of [
+    { col: "#5f5c56", add: 2.4 },
+    { col: "#cfcab8", add: 0 },
+  ]) {
+    g.strokeStyle = pass.col;
+    for (const r of bm.roads) {
+      g.lineWidth = Math.max(1, (r.w + pass.add) * k);
+      trace(r.pts);
+      g.stroke();
+    }
+  }
+
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+function BaseGround({ world, bm }: { world: WorldState; bm: BaseMap }) {
+  const zoneKey = (world.zones ?? []).map((z) => `${z.id}:${z.style?.ground ?? z.color}`).join("|");
+  const tex = useMemo(() => makeBaseGroundTexture(world, bm), [world.width, bm, zoneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => tex.dispose(), [tex]);
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <planeGeometry args={[world.width, world.height]} />
+      <meshStandardMaterial map={tex} roughness={0.95} metalness={0} />
+    </mesh>
+  );
+}
+
+/** The seven hand-modelled landmarks, at their real OpenStreetMap positions. */
+function BaseLandmarks({ world, bm, day }: { world: WorldState; bm: BaseMap; day: Daylight }) {
+  const glow = Math.pow(1 - day.daylight, 1.5);
+  const FOOT = 2.6; // footprints are small at 20 m/unit; scale up so they read
+  return (
+    <group>
+      {bm.landmarks.map((l) => {
+        const x = toX(world, l.x + l.w / 2);
+        const z = toZ(world, l.y + l.h / 2);
+        const w = Math.max(8, l.w * FOOT);
+        const d = Math.max(8, l.h * FOOT);
+        const H = heightUnits(bm, l.height);
+        const common = { position: [x, 0, z] as [number, number, number] };
+        switch (l.id) {
+          case "eureka":
+            return (
+              <group key={l.id} {...common}>
+                <mesh position={[0, H * 0.45, 0]} castShadow>
+                  <boxGeometry args={[w, H * 0.9, d]} />
+                  <meshStandardMaterial color="#4d6d94" roughness={0.25} metalness={0.55} emissive="#ffd48a" emissiveIntensity={glow * 0.5} />
+                </mesh>
+                <mesh position={[0, H * 0.95, 0]} castShadow>
+                  <boxGeometry args={[w * 1.02, H * 0.12, d * 1.02]} />
+                  <meshStandardMaterial color="#d4af37" roughness={0.3} metalness={0.85} emissive="#ffcc55" emissiveIntensity={0.2 + glow} />
+                </mesh>
+                <Label text={l.name} y={H * 1.12} />
+              </group>
+            );
+          case "rialto":
+            return (
+              <group key={l.id} {...common}>
+                <mesh position={[-w * 0.22, H * 0.5, 0]} castShadow>
+                  <boxGeometry args={[w * 0.5, H, d * 0.85]} />
+                  <meshStandardMaterial color="#54657d" roughness={0.3} metalness={0.5} emissive="#ffe0a0" emissiveIntensity={glow * 0.4} />
+                </mesh>
+                <mesh position={[w * 0.26, H * 0.36, 0]} castShadow>
+                  <boxGeometry args={[w * 0.44, H * 0.72, d * 0.8]} />
+                  <meshStandardMaterial color="#6b7d95" roughness={0.3} metalness={0.5} emissive="#ffe0a0" emissiveIntensity={glow * 0.35} />
+                </mesh>
+                <Label text={l.name} y={H * 1.1} />
+              </group>
+            );
+          case "stpauls":
+            return (
+              <group key={l.id} {...common}>
+                <mesh position={[0, H * 0.28, 0]} castShadow>
+                  <boxGeometry args={[w, H * 0.55, d]} />
+                  <meshStandardMaterial color="#b9a98a" roughness={0.85} />
+                </mesh>
+                {[-w * 0.32, 0, w * 0.32].map((dx, i) => (
+                  <mesh key={i} position={[dx, H * (i === 1 ? 0.85 : 0.7), 0]} castShadow>
+                    <coneGeometry args={[w * 0.13, H * (i === 1 ? 0.6 : 0.36), 8]} />
+                    <meshStandardMaterial color="#8f9a86" roughness={0.7} emissive="#ffdca8" emissiveIntensity={glow * 0.4} />
+                  </mesh>
+                ))}
+                <Label text={l.name} y={H * 1.2} />
+              </group>
+            );
+          case "mcg":
+            return (
+              <group key={l.id} {...common}>
+                <mesh position={[0, H * 0.5, 0]} scale={[1, 1, d / w]} castShadow>
+                  <cylinderGeometry args={[w / 2, w / 2 - w * 0.06, H, 40, 1, true]} />
+                  <meshStandardMaterial color="#c2c2c2" side={THREE.DoubleSide} roughness={0.8} />
+                </mesh>
+                <mesh position={[0, 0.6, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[1, d / w, 1]}>
+                  <circleGeometry args={[w / 2 - w * 0.12, 40]} />
+                  <meshStandardMaterial color="#3f8a3a" roughness={0.95} />
+                </mesh>
+                {[0, 1, 2, 3, 4, 5].map((i) => {
+                  const a = (i / 6) * Math.PI * 2;
+                  return (
+                    <mesh key={i} position={[Math.cos(a) * (w / 2 - 1), H * 1.5, Math.sin(a) * (d / 2 - 1)]}>
+                      <boxGeometry args={[1.6, H * 1.2, 1.6]} />
+                      <meshStandardMaterial color="#dcdcdc" emissive="#ffffff" emissiveIntensity={glow * 2.2} />
+                    </mesh>
+                  );
+                })}
+                <Label text="MCG" y={H * 2.3} />
+              </group>
+            );
+          case "shrine":
+            return (
+              <group key={l.id} {...common}>
+                <mesh position={[0, H * 0.12, 0]} castShadow>
+                  <boxGeometry args={[w * 1.15, H * 0.24, d * 1.15]} />
+                  <meshStandardMaterial color="#cfc6ab" roughness={0.9} />
+                </mesh>
+                <mesh position={[0, H * 0.45, 0]} castShadow>
+                  <boxGeometry args={[w * 0.8, H * 0.45, d * 0.8]} />
+                  <meshStandardMaterial color="#d8cfb4" roughness={0.85} />
+                </mesh>
+                <mesh position={[0, H * 0.85, 0]} castShadow>
+                  <coneGeometry args={[w * 0.42, H * 0.36, 4]} />
+                  <meshStandardMaterial color="#c3b89b" roughness={0.85} emissive="#ffe6b0" emissiveIntensity={glow * 0.5} />
+                </mesh>
+                <Label text={l.name} y={H * 1.15} />
+              </group>
+            );
+          case "exhibition":
+            return (
+              <group key={l.id} {...common}>
+                <mesh position={[0, H * 0.25, 0]} castShadow>
+                  <boxGeometry args={[w, H * 0.5, d]} />
+                  <meshStandardMaterial color="#ddd0b4" roughness={0.85} />
+                </mesh>
+                <mesh position={[0, H * 0.62, 0]} castShadow>
+                  <sphereGeometry args={[Math.min(w, d) * 0.3, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                  <meshStandardMaterial color="#7fa08c" roughness={0.6} metalness={0.3} emissive="#cfe8d8" emissiveIntensity={glow * 0.5} />
+                </mesh>
+                <mesh position={[0, H * 0.82, 0]}>
+                  <coneGeometry args={[Math.min(w, d) * 0.08, H * 0.2, 8]} />
+                  <meshStandardMaterial color="#b9a86a" />
+                </mesh>
+                <Label text={l.name} y={H * 1.1} />
+              </group>
+            );
+          default: // fedsquare — angular plates
+            return (
+              <group key={l.id} {...common}>
+                {[
+                  [-0.3, 0.2, 1],
+                  [0.15, -0.15, 1.3],
+                  [0.35, 0.28, 0.85],
+                ].map(([dx, dz, hf], i) => (
+                  <mesh key={i} position={[dx * w, (H * hf) / 2, dz * d]} rotation={[0, i * 0.35, 0]} castShadow>
+                    <boxGeometry args={[w * 0.45, H * hf, d * 0.5]} />
+                    <meshStandardMaterial color={["#8a7f6a", "#6d6a63", "#a08c62"][i]} roughness={0.9} />
+                  </mesh>
+                ))}
+                <Label text={l.name} y={H * 1.6} />
+              </group>
+            );
+        }
+      })}
+    </group>
+  );
+}
+
+/** A small always-facing label above a landmark. */
+function Label({ text, y }: { text: string; y: number }) {
+  const tex = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = 512;
+    c.height = 64;
+    const g = c.getContext("2d")!;
+    g.font = "600 34px system-ui, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.lineWidth = 6;
+    g.strokeStyle = "rgba(0,0,0,0.65)";
+    g.strokeText(text, 256, 34);
+    g.fillStyle = "#ffffff";
+    g.fillText(text, 256, 34);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, [text]);
+  useEffect(() => () => tex.dispose(), [tex]);
+  return (
+    <sprite position={[0, y, 0]} scale={[52, 6.5, 1]} renderOrder={999}>
+      <spriteMaterial map={tex} transparent depthWrite={false} depthTest={false} toneMapped={false} />
+    </sprite>
+  );
+}
+
+/** Traffic that follows the real road network. */
+function BaseTraffic({ world, bm, day }: { world: WorldState; bm: BaseMap; day: Daylight }) {
+  const cars = useMemo(() => {
+    const wide = bm.roads.filter((r) => r.pts.length >= 8).sort((a, b) => b.w - a.w);
+    const out: Array<{ pts: number[]; t: number; speed: number; color: string }> = [];
+    for (let i = 0; i < 26 && wide.length; i++) {
+      const road = wide[(i * 5) % Math.min(wide.length, 120)];
+      out.push({ pts: road.pts, t: (i * 0.31) % 1, speed: 0.04 + (i % 4) * 0.012, color: ["#d64545", "#e8e8e8", "#3b6fd1", "#f2d24b", "#2b2b2b"][i % 5] });
+    }
+    return out;
+  }, [bm]);
+  const refs = useRef<Array<THREE.Mesh | null>>([]);
+  useFrame((_, dt) => {
+    cars.forEach((car, i) => {
+      const m = refs.current[i];
+      if (!m) return;
+      car.t = (car.t + dt * car.speed) % 1;
+      const n = car.pts.length / 2 - 1;
+      const f = car.t * n;
+      const seg = Math.min(n - 1, Math.floor(f));
+      const lt = f - seg;
+      const ax = car.pts[seg * 2];
+      const ay = car.pts[seg * 2 + 1];
+      const bx = car.pts[(seg + 1) * 2];
+      const by = car.pts[(seg + 1) * 2 + 1];
+      m.position.set(toX(world, ax + (bx - ax) * lt), 1.1, toZ(world, ay + (by - ay) * lt));
+      m.rotation.y = -Math.atan2(by - ay, bx - ax);
+    });
+  });
+  const glow = Math.pow(1 - day.daylight, 1.3) * 2;
+  return (
+    <group>
+      {cars.map((c, i) => (
+        <mesh
+          key={i}
+          ref={(el) => {
+            refs.current[i] = el;
+          }}
+          castShadow
+        >
+          <boxGeometry args={[5, 2, 2.6]} />
+          <meshStandardMaterial color={c.color} emissive="#ffe6a0" emissiveIntensity={glow * 0.4} roughness={0.4} metalness={0.3} />
+        </mesh>
+      ))}
+    </group>
+  );
 }
 
 /* ------------------------------ geometry --------------------------------- */
@@ -866,6 +1160,7 @@ function CameraRig({
 function Scene({
   world,
   city,
+  bm,
   day,
   rain,
   selectedId,
@@ -874,6 +1169,7 @@ function Scene({
 }: {
   world: WorldState;
   city: CityLayout;
+  bm: BaseMap | null;
   day: Daylight;
   rain: boolean;
   selectedId?: string | null;
@@ -888,17 +1184,29 @@ function Scene({
       <Lighting day={day} />
       <SkyDome day={day} />
       <Stars day={day} />
-      <group onClick={() => onSelect?.(null)}>
-        <Ground world={world} city={city} />
-        <Water world={world} city={city} day={day} />
-      </group>
-      <CityBuildings world={world} city={city} takenLots={takenLots} day={day} />
-      <RoofClutter world={world} city={city} takenLots={takenLots} />
-      <Landmarks world={world} city={city} day={day} />
-      <Trees world={world} city={city} />
-      <Lamps world={world} city={city} day={day} />
-      <Neon world={world} city={city} day={day} />
-      <Traffic world={world} city={city} day={day} />
+      {bm ? (
+        <>
+          <group onClick={() => onSelect?.(null)}>
+            <BaseGround world={world} bm={bm} />
+          </group>
+          <BaseLandmarks world={world} bm={bm} day={day} />
+          <BaseTraffic world={world} bm={bm} day={day} />
+        </>
+      ) : (
+        <>
+          <group onClick={() => onSelect?.(null)}>
+            <Ground world={world} city={city} />
+            <Water world={world} city={city} day={day} />
+          </group>
+          <CityBuildings world={world} city={city} takenLots={takenLots} day={day} />
+          <RoofClutter world={world} city={city} takenLots={takenLots} />
+          <Landmarks world={world} city={city} day={day} />
+          <Trees world={world} city={city} />
+          <Lamps world={world} city={city} day={day} />
+          <Neon world={world} city={city} day={day} />
+          <Traffic world={world} city={city} day={day} />
+        </>
+      )}
       {world.entities.map((e) => {
         const meta = e.meta as EntityMeta;
         const emphasized = e.id === selectedId || Boolean(highlightSubmissionId && meta.submissionId === highlightSubmissionId);
@@ -946,6 +1254,12 @@ export function World3D({
     const t = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(t);
   }, []);
+  // Belt and braces: never leave someone staring at a spinner if the ready
+  // signal is missed (a dropped frame callback, a hot reload mid-mount).
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 8000);
+    return () => clearTimeout(t);
+  }, []);
   const when = hourOverride === null ? now : dateAtLocalHour(hourOverride, now);
   const day = useMemo(() => daylightAt(when), [when]);
   // Memoise on stable keys: the server hands us a fresh zones array on every refresh.
@@ -954,6 +1268,7 @@ export function World3D({
     () => generateCity(world.citySeed ?? "city", JSON.parse(zonesKey), world.width),
     [world.citySeed, zonesKey, world.width],
   );
+  const bm = useMemo(() => getBaseMap(world.baseMapId), [world.baseMapId]);
 
   const focus = useMemo(() => {
     if (!focusZoneId) return null;
@@ -991,7 +1306,7 @@ export function World3D({
           screenSpacePanning={false}
           target={[0, 0, 0]}
         />
-        <Scene world={world} city={city} day={day} rain={rain} selectedId={selectedId} highlightSubmissionId={highlightSubmissionId} onSelect={onSelect} />
+        <Scene world={world} city={city} bm={bm} day={day} rain={rain} selectedId={selectedId} highlightSubmissionId={highlightSubmissionId} onSelect={onSelect} />
       </Canvas>
 
       {!ready && (

@@ -5,7 +5,12 @@ import type { Json } from "@/lib/supabase/database.types";
 import { InsufficientCreditsError, spend, refundSubmission } from "@/lib/credits/ledger";
 import { filterPrompt, type RoomRules } from "@/lib/moderation/prompt-filter";
 import { getImageProvider } from "@/lib/providers/image";
-import { applyWorldSubmission } from "@/lib/world/service";
+import { applyWorldSubmission, roomWorld } from "@/lib/world/service";
+import { detectZoneTheme } from "@/lib/world/planner";
+import { ZONE_THEME_COST_CREDITS } from "@/lib/world/pricing";
+
+
+
 import {
   resolveWindow,
   submissionCost,
@@ -120,7 +125,14 @@ export async function submit(input: {
   }
 
   const provider = getImageProvider(input.providerKey);
-  const cost = freeform ? config.basePriceCredits : submissionCost(config, lane, bid);
+  // Restyling a whole district changes far more than adding one object, so it's
+  // priced above a normal prompt regardless of lane.
+  const themesArea = room.type === "world" && detectZoneTheme(mod.normalized, roomWorld(room)?.zones ?? []) !== null;
+  const cost = themesArea
+    ? ZONE_THEME_COST_CREDITS
+    : freeform
+      ? config.basePriceCredits
+      : submissionCost(config, lane, bid);
 
   const { data: sub, error: insErr } = await admin
     .from("queue_submissions")

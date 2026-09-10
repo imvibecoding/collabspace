@@ -1,4 +1,4 @@
-import type { WorldZone } from "./zones";
+import type { WorldZone, ZoneStyle } from "./zones";
 
 /**
  * World rooms: a shared top-down 2D world (old-GTA style) that people grow
@@ -66,13 +66,17 @@ export interface WorldState {
   zones: WorldZone[];
   /** Seed for the procedural city layout (roads, lots, landmarks). Present for city worlds. */
   citySeed?: string;
+  /** Real-world base map to draw under everything, e.g. "melbourne". See basemap.ts. */
+  baseMapId?: string;
 }
 
 export type WorldOp =
   | { op: "add"; entity: WorldEntity }
   | { op: "remove"; id: string; entity?: WorldEntity }
   | { op: "move"; id: string; x: number; y: number; rotation?: number; from?: { x: number; y: number; rotation: number } }
-  | { op: "modify"; id: string; changes: Partial<Pick<WorldEntity, "name" | "color" | "w" | "h" | "spriteUrl" | "kind">>; before?: Partial<WorldEntity> };
+  | { op: "modify"; id: string; changes: Partial<Pick<WorldEntity, "name" | "color" | "w" | "h" | "spriteUrl" | "kind">>; before?: Partial<WorldEntity> }
+  /** Restyle a whole district ("make the west look like a rainy port"). */
+  | { op: "zone"; zoneId: string; style: ZoneStyle | null; before?: ZoneStyle | null };
 
 export interface WorldPatch {
   ops: WorldOp[];

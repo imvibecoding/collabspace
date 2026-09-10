@@ -92,6 +92,45 @@ describe("replay", () => {
   });
 });
 
+describe("area theming", () => {
+  const cityWorld = () => ({ ...emptyWorld("city"), zones: melbourneZones(1024) });
+
+  it("restyles a district and produces a revertible patch", async () => {
+    const state = cityWorld();
+    const p = await planner.plan("make the west look like a dirty slum", ctx(state));
+    expect(p.ops).toHaveLength(1);
+    const op = p.ops[0];
+    expect(op.op).toBe("zone");
+    if (op.op === "zone") {
+      expect(op.zoneId).toBe("west");
+      expect(op.style?.heightScale).toBeLessThan(1);
+      expect(op.style?.label).toContain("slum");
+    }
+    expect(p.summary).toContain("restyled the West");
+
+    const applied = applyPatch(state, p);
+    expect(applied.state.zones.find((z) => z.id === "west")?.style).toBeTruthy();
+    const back = applyPatch(applied.state, applied.inverse);
+    expect(back.state.zones.find((z) => z.id === "west")?.style).toBeUndefined();
+  });
+
+  it("reads several phrasings and picks a matching look", async () => {
+    const state = cityWorld();
+    const neon = await planner.plan("turn the cbd into a neon cyberpunk district", ctx(state));
+    expect(neon.ops[0].op === "zone" && neon.ops[0].zoneId).toBe("central");
+    if (neon.ops[0].op === "zone") expect(neon.ops[0].style?.neon).toBeGreaterThan(0.5);
+
+    const beach = await planner.plan("make st kilda look like a tropical resort", ctx(state));
+    expect(beach.ops[0].op === "zone" && beach.ops[0].zoneId).toBe("south");
+  });
+
+  it("leaves ordinary prompts alone", async () => {
+    const state = cityWorld();
+    const p = await planner.plan("build a bank in toorak", ctx(state));
+    expect(p.ops[0].op).toBe("add");
+  });
+});
+
 describe("zone-aware placement", () => {
   const cityWorld = () => ({ ...emptyWorld("city"), zones: melbourneZones(1024) });
 
