@@ -1,4 +1,4 @@
-# World Rooms — design note (updated 2026-09-10)
+# World Rooms — design note (updated 2026-09-10, evening)
 
 ## Why this is the viral room
 
@@ -50,35 +50,61 @@ react-three-fiber, that follows the real sun over Melbourne.
   Australia/Melbourne timezone drives sun direction, colour, ambient, sky, fog, window/lamp/
   neon glow and stars. A scrubber lets a visitor preview any hour.
 
-## Fidelity: where the graphics can actually go
+## The base map is real (since 2026-09-10)
 
-Procedural boxes give structure and lighting, not the painted density of the
-Shadowrun-style reference. Three levers, in order of payoff:
+The city is no longer generated: it is Melbourne's actual outline, taken from
+OpenStreetMap and shipped as a 44 KB committed asset
+(`src/lib/world/basemap-melbourne.json`, built by `scripts/build-basemap.mjs`).
 
-1. **Real geometry from OpenStreetMap (recommended).** Probed 2026-09-10 against the
-   Overpass API for the CBD box (-37.825,144.950 → -37.808,144.975): **2,095 building
-   footprints in 7.1s, 754 with height/levels tags, 609 named** — Eureka Tower, Rialto
-   Towers, Crown, St Paul's, the Exhibition Centre all present with real outlines and
-   heights. Licence is ODbL: free to use with attribution. This is the honest route to
-   "it actually resembles Melbourne": extrude real footprints instead of generated lots,
-   keep the district/lot/prompt system on top. Cost: a fetch-and-cache step at world
-   creation, polygon extrusion instead of rectangles, and an attribution line in the UI.
-2. **Art assets.** Per-district facade texture sets, kerbs/street furniture, and landmark
-   meshes. Blender 5.1 is installed locally and can run headless
-   (`blender --background --python`) to bake these; or a CC0 kit. Needs an explicit
-   download/authoring step.
-3. **Image-model textures / an LLM planner.** The `SpriteGenerator` and `WorldPlanner`
-   seams already exist for this.
+What's in it, for a ~21 km box around the CBD:
 
-**Not viable:** Google Earth/Maps screenshots. Their terms don't allow deriving base maps
-or textures from that imagery, so it can't be the source even as a "guide" for generated
-assets. OSM gives the same real-world fidelity without the licensing problem.
+- **Water** — Port Phillip Bay (the shore's many directed ways joined end-to-start
+  and closed into one fillable ring), the Yarra, and 53 lakes/riverbank polygons.
+- **Green** — the 60 largest parks and reserves.
+- **Roads** — 538 motorway/trunk/primary ways, simplified with Douglas–Peucker.
+- **Landmarks** — 7 matched by exact OSM name and hand-modelled in three.js at
+  their real coordinates: Eureka Tower, Rialto Towers, St Paul's Cathedral, the
+  MCG, Federation Square, the Shrine of Remembrance, the Royal Exhibition Building.
 
-**Hunyuan3D-WorldClaw** — re-checked 2026-09-10 (third check). The repo still holds only
-`README.md` and an `assets/` folder; the single changelog line remains "2026.08.07: Paper
-and project page are released!". No code, weights, licence or API, so there is nothing to
-run and nothing to feed a reference image into. It also reads as open-world/terrain
-generation rather than urban. Revisit if it ships.
+Deliberately **not** every building. The base is an outline plus landmarks;
+everything else is what people prompt in. Districts are realigned to the real
+geography (`melbourneGeoZones`), which the tests assert by checking the MCG falls
+in East, the Exhibition Building in North, the Shrine in South, and Rialto and
+Fed Square in Central.
+
+### Scale
+
+~20 m per world unit, so real heights are exaggerated ×3.6 to keep a skyline
+readable. Prompted things use `BASEMAP_ENTITY_SIZE` rather than true scale — a
+real car is 0.2 units and would be invisible — so small things are enlarged
+enough to see once you zoom into a district.
+
+### Area restyling
+
+A prompt like "make the west look like an industrial port" applies a `ZoneStyle`
+(ground tint, facade palette, height scale, density, neon) to a whole district.
+It's an ordinary patch, so it reverts, replays and appeals like anything else.
+Ten looks are recognised: slum, neon/cyberpunk, tropical, desert, snow, forest,
+industrial, luxury, ruins, medieval. Priced at 15 credits against 1 for a normal
+prompt, since it changes a whole quarter of the map.
+
+### Why not Google, and what about WorldClaw
+
+Google Earth/Maps imagery can't be the source: their terms don't permit deriving
+base maps or textures from it, even as a guide for generated assets. OSM gives
+the same real-world fidelity under ODbL with attribution.
+
+**Hunyuan3D-WorldClaw** — checked three times (2026-09-09 twice, 2026-09-10). The
+repo still holds only `README.md` and an `assets/` folder, with one changelog
+line: "2026.08.07: Paper and project page are released!". No code, weights,
+licence or API, so there is nothing to run and nothing to feed a reference image
+into. Revisit if it ships.
+
+### Still open
+
+Texture richness. Structure and lighting are real; surfaces are flat colour.
+Next levers: per-district facade textures, street furniture, and landmark meshes
+baked in Blender 5.1 (installed locally, runs headless) or a CC0 kit.
 
 ## Room rules
 
